@@ -575,22 +575,41 @@ void handleWebClient(WiFiClient client) {
             // Quick capture endpoints
             bool useFlash = false;
             bool autoFlash = false;
+            String resolutionStr = "UXGA"; // Default resolution
             
-            if (request.indexOf("/snap/flash") >= 0) {
-              useFlash = true;
-              Serial.println("QUICK SNAP: Force flash");
-            } else if (request.indexOf("/snap/auto") >= 0) {
-              autoFlash = true;
-              useFlash = isLightLowSimple();
-              Serial.printf("QUICK SNAP: Auto flash = %s\n", useFlash ? "ON" : "OFF");
+            // Parse URL for pattern like /snap/RESOLUTION/flash, /snap/RESOLUTION/auto, or /snap/RESOLUTION
+            if (request.indexOf("/snap/") >= 0) {
+              // Extract resolution - check both with and without trailing slash
+              if (request.indexOf("/snap/UXGA") >= 0) resolutionStr = "UXGA";
+              else if (request.indexOf("/snap/SXGA") >= 0) resolutionStr = "SXGA";
+              else if (request.indexOf("/snap/XGA") >= 0) resolutionStr = "XGA";
+              else if (request.indexOf("/snap/SVGA") >= 0) resolutionStr = "SVGA";
+              else if (request.indexOf("/snap/VGA") >= 0) resolutionStr = "VGA";
+              else if (request.indexOf("/snap/CIF") >= 0) resolutionStr = "CIF";
+              else if (request.indexOf("/snap/QVGA") >= 0) resolutionStr = "QVGA";
+              else if (request.indexOf("/snap/HQVGA") >= 0) resolutionStr = "HQVGA";
+              
+              // Check for standard flash modes after resolution or directly
+              if (request.indexOf("/flash") >= 0) {
+                useFlash = true;
+                Serial.printf("QUICK SNAP: Force flash with %s resolution\n", resolutionStr.c_str());
+              } else if (request.indexOf("/auto") >= 0) {
+                autoFlash = true;
+                useFlash = isLightLowSimple();
+                Serial.printf("QUICK SNAP: Auto flash = %s with %s resolution\n", 
+                             useFlash ? "ON" : "OFF", resolutionStr.c_str());
+              } else {
+                Serial.printf("QUICK SNAP: Normal (no flash) with %s resolution\n", resolutionStr.c_str());
+              }
             } else {
-              Serial.println("QUICK SNAP: Normal (no flash)");
+              // Original behavior for simple /snap endpoint (no resolution or flash specified)
+              Serial.println("QUICK SNAP: Normal (no flash) with default UXGA resolution");
             }
             
-            // Quick capture with default UXGA resolution
+            // Set the requested resolution for this capture
             sensor_t * s = esp_camera_sensor_get();
             framesize_t originalSize = s->status.framesize;
-            s->set_framesize(s, FRAMESIZE_UXGA);
+            s->set_framesize(s, getFrameSize(resolutionStr));
             
             camera_fb_t * fb = captureWithFlash(useFlash);
             
