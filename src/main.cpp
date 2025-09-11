@@ -203,8 +203,23 @@ camera_fb_t* captureWithFlash(bool useFlash) {
     
     return fb;
   } else {
-    // Normal capture without flash
-    return esp_camera_fb_get();
+    // Normal capture without flash - add warm-up for stable image quality
+    Serial.println("NORMAL CAPTURE: Warming up camera...");
+    
+    // Discard warm-up frames for consistent exposure and focus
+    for (int i = 0; i < 2; i++) {
+      camera_fb_t * warmup = esp_camera_fb_get();
+      if (warmup) {
+        esp_camera_fb_return(warmup);
+      }
+      delay(50); // Shorter delay for non-flash captures
+    }
+    
+    // Capture the final frame
+    Serial.println("NORMAL CAPTURE: Capturing final frame");
+    camera_fb_t * fb = esp_camera_fb_get();
+    
+    return fb;
   }
 }
 
