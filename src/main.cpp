@@ -70,6 +70,19 @@ WiFiServer server(80);
 // ===================
 
 /**
+ * Convert RSSI (dBm) to signal strength percentage
+ * Based on typical WiFi signal strength ranges
+ */
+int rssiToPercentage(int rssi) {
+  if (rssi >= -50) return 100;  // Excellent signal
+  if (rssi >= -60) return 80;   // Very good signal  
+  if (rssi >= -70) return 60;   // Good signal
+  if (rssi >= -80) return 40;   // Fair signal
+  if (rssi >= -90) return 20;   // Weak signal
+  return 0;                     // Very weak/no signal
+}
+
+/**
  * Convert resolution string parameter to framesize_t enum
  */
 framesize_t getFrameSize(String sizeParam) {
@@ -666,6 +679,7 @@ void handleWebClient(WiFiClient client) {
             status += "\"ssid\":\"" + String(ssid) + "\",";
             status += "\"mode\":\"" + String(USE_STATIC_IP ? "Static" : "DHCP") + "\",";
             status += "\"rssi\":" + String(WiFi.RSSI()) + ",";
+            status += "\"signal_percent\":" + String(rssiToPercentage(WiFi.RSSI())) + ",";
             status += "\"connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false");
             status += "},";
             status += "\"camera\":{";
