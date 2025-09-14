@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32-CAM Live Stream</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            min-height: 100vh;
+        }
+
+        .video-section {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .controls-section {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .control-panel, .payload-panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        h1, h2 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #fff;
+        }
+
+        #stream-container {
+            position: relative;
+            width: 100%;
+            max-width: 100%;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        #camera-display {
+            width: 100%;
+            height: auto;
+            display: block;
+            max-height: 70vh;
+            object-fit: contain;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            min-height: 300px;
+        }
+        
+        #camera-placeholder {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 300px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 18px;
+            text-align: center;
+        }
+
+        .photo-overlay {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .slider-container {
+            position: relative;
+            margin-bottom: 15px;
+        }
+
+        .slider {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.3);
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        .slider::-webkit-slider-thumb {
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .slider-value {
+            position: absolute;
+            right: 0;
+            top: -25px;
+            background: #4CAF50;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        select, button {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 10px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        select option {
+            background: #1e3c72;
+            color: #fff;
+        }
+
+        button {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .flash-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .flash-controls button {
+            margin: 0;
+        }
+
+        .payload-display {
+            background: #1a1a2e;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .payload-display pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-connected {
+            background: #4CAF50;
+            box-shadow: 0 0 10px #4CAF50;
+        }
+
+        .status-disconnected {
+            background: #f44336;
+            box-shadow: 0 0 10px #f44336;
+        }
+
+        .timestamp {
+            color: #888;
+            font-size: 10px;
+            margin-bottom: 10px;
+        }
+
+        @media (max-width: 1024px) {
+            .container {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+            
+            .controls-section {
+                order: 2;
+            }
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 300px;
+            font-size: 18px;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="video-section">
+            <h1>ESP32-CAM Photo Capture</h1>
+            <div id="stream-container">
+                <div id="camera-placeholder">
+                    <div>
+                        <p>Click "Take Photo" to capture an image</p>
+                        <p style="font-size: 14px; margin-top: 10px; color: rgba(255, 255, 255, 0.4);">Adjust settings below and click capture</p>
+                    </div>
+                </div>
+                <img id="camera-display" src="" alt="ESP32-CAM Photo" style="display: none;">
+                <div class="photo-overlay" style="display: none;">
+                    <span class="status-indicator" id="connection-status"></span>
+                    <span id="photo-status">Ready</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls-section">
+            <div class="control-panel">
+                <h2>Camera Controls</h2>
+                
+                <div class="control-group">
+                    <label for="resolution-select">Resolution:</label>
+                    <select id="resolution-select">
+                        <option value="UXGA">UXGA (1600x1200)</option>
+                        <option value="SXGA">SXGA (1280x1024)</option>
+                        <option value="XGA">XGA (1024x768)</option>
+                        <option value="SVGA">SVGA (800x600)</option>
+                        <option value="VGA">VGA (640x480)</option>
+                        <option value="CIF">CIF (400x296)</option>
+                        <option value="QVGA">QVGA (320x240)</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>Brightness:</label>
+                    <div class="slider-container">
+                        <input type="range" id="brightness-slider" class="slider" min="-2" max="2" value="0" step="1">
+                        <span class="slider-value" id="brightness-value">0</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Contrast:</label>
+                    <div class="slider-container">
+                        <input type="range" id="contrast-slider" class="slider" min="-2" max="2" value="0" step="1">
+                        <span class="slider-value" id="contrast-value">0</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Exposure:</label>
+                    <div class="slider-container">
+                        <input type="range" id="exposure-slider" class="slider" min="0" max="1200" value="300" step="50">
+                        <span class="slider-value" id="exposure-value">300</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Flash Controls:</label>
+                    <div class="flash-controls">
+                        <button id="flash-on">Flash ON</button>
+                        <button id="flash-off">Flash OFF</button>
+                    </div>
+                </div>
+
+                <button id="capture-btn">Take Photo</button>
+            </div>
+
+            <div class="payload-panel">
+                <h2>API Payload</h2>
+                <div class="timestamp" id="last-updated">Last updated: Never</div>
+                <div class="payload-display">
+                    <pre id="payload-content">{
+  "resolution": "UXGA",
+  "flash": "off",
+  "brightness": 0,
+  "contrast": 0,
+  "exposure": 300
+}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class ESP32CameraController {
+            constructor() {
+                this.baseUrl = 'http://192.168.50.3';
+                this.isConnected = false;
+                this.currentSettings = {
+                    resolution: 'UXGA',
+                    flash: 'off',
+                    brightness: 0,
+                    contrast: 0,
+                    exposure: 300
+                };
+                
+                this.init();
+            }
+
+            init() {
+                this.bindEvents();
+                this.updatePayloadDisplay();
+            }
+
+            bindEvents() {
+                // Resolution change
+                document.getElementById('resolution-select').addEventListener('change', (e) => {
+                    this.currentSettings.resolution = e.target.value;
+                    this.updatePayloadDisplay();
+                });
+
+                // Brightness control
+                const brightnessSlider = document.getElementById('brightness-slider');
+                const brightnessValue = document.getElementById('brightness-value');
+                brightnessSlider.addEventListener('input', (e) => {
+                    const value = parseInt(e.target.value);
+                    this.currentSettings.brightness = value;
+                    brightnessValue.textContent = value;
+                    this.updateCameraSetting('brightness', value);
+                    this.updatePayloadDisplay();
+                });
+
+                // Contrast control
+                const contrastSlider = document.getElementById('contrast-slider');
+                const contrastValue = document.getElementById('contrast-value');
+                contrastSlider.addEventListener('input', (e) => {
+                    const value = parseInt(e.target.value);
+                    this.currentSettings.contrast = value;
+                    contrastValue.textContent = value;
+                    this.updateCameraSetting('contrast', value);
+                    this.updatePayloadDisplay();
+                });
+
+                // Exposure control
+                const exposureSlider = document.getElementById('exposure-slider');
+                const exposureValue = document.getElementById('exposure-value');
+                exposureSlider.addEventListener('input', (e) => {
+                    const value = parseInt(e.target.value);
+                    this.currentSettings.exposure = value;
+                    exposureValue.textContent = value;
+                    this.updateCameraSetting('exposure', value);
+                    this.updatePayloadDisplay();
+                });
+
+                // Flash controls
+                document.getElementById('flash-on').addEventListener('click', () => {
+                    this.setFlash(true);
+                });
+
+                document.getElementById('flash-off').addEventListener('click', () => {
+                    this.setFlash(false);
+                });
+
+                // Capture button
+                document.getElementById('capture-btn').addEventListener('click', () => {
+                    this.takePhoto();
+                });
+            }
+
+            async updateCameraSetting(setting, value) {
+                // Camera settings are applied in real-time through the stream
+                console.log(`${setting} updated to ${value}`);
+            }
+
+            async setFlash(on) {
+                this.currentSettings.flash = on ? 'on' : 'off';
+                this.updatePayloadDisplay();
+                console.log(`Flash ${on ? 'ON' : 'OFF'}`);
+            }
+
+            async takePhoto() {
+                const { resolution, flash, brightness, contrast, exposure } = this.currentSettings;
+                const url = `${this.baseUrl}/snapshot`;
+                const payload = {
+                    resolution: resolution,
+                    flash: flash === 'on',
+                    brightness: brightness,
+                    contrast: contrast,
+                    exposure: exposure
+                };
+                
+                // Update UI to show capturing state
+                const captureBtn = document.getElementById('capture-btn');
+                const originalText = captureBtn.textContent;
+                captureBtn.textContent = 'Capturing...';
+                captureBtn.disabled = true;
+                
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    if (response.ok) {
+                        const blob = await response.blob();
+                        const imageUrl = URL.createObjectURL(blob);
+                        
+                        // Display the captured image
+                        const imageDisplay = document.getElementById('camera-display');
+                        const placeholder = document.getElementById('camera-placeholder');
+                        const overlay = document.querySelector('.photo-overlay');
+                        
+                        imageDisplay.src = imageUrl;
+                        imageDisplay.style.display = 'block';
+                        placeholder.style.display = 'none';
+                        overlay.style.display = 'block';
+                        
+                        document.getElementById('connection-status').className = 'status-indicator status-connected';
+                        document.getElementById('photo-status').textContent = 'Photo captured';
+                        
+                        // Also create download link
+                        const link = document.createElement('a');
+                        link.href = imageUrl;
+                        link.download = `esp32-photo-${Date.now()}.jpg`;
+                        link.click();
+                        
+                        console.log('Photo captured successfully');
+                        this.updatePayloadDisplay();
+                        
+                        // Update connection status
+                        if (!this.isConnected) {
+                            this.isConnected = true;
+                        }
+                    } else {
+                        throw new Error('Failed to capture photo');
+                    }
+                } catch (error) {
+                    console.error('Failed to capture photo:', error);
+                    const overlay = document.querySelector('.photo-overlay');
+                    overlay.style.display = 'block';
+                    document.getElementById('connection-status').className = 'status-indicator status-disconnected';
+                    document.getElementById('photo-status').textContent = 'Capture failed';
+                    this.isConnected = false;
+                } finally {
+                    captureBtn.textContent = originalText;
+                    captureBtn.disabled = false;
+                }
+            }
+
+
+            updatePayloadDisplay() {
+                const payloadContent = document.getElementById('payload-content');
+                const lastUpdated = document.getElementById('last-updated');
+                
+                const payload = {
+                    resolution: this.currentSettings.resolution,
+                    flash: this.currentSettings.flash,
+                    brightness: this.currentSettings.brightness,
+                    contrast: this.currentSettings.contrast,
+                    exposure: this.currentSettings.exposure,
+                    timestamp: new Date().toISOString(),
+                    api_endpoint: `${this.baseUrl}/snapshot`,
+                    method: 'POST',
+                    content_type: 'application/json'
+                };
+                
+                payloadContent.textContent = JSON.stringify(payload, null, 2);
+                lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+            }
+        }
+
+        // Initialize the controller when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new ESP32CameraController();
+        });
+    </script>
+</body>
+</html>
