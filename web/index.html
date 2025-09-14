@@ -261,6 +261,105 @@
             font-size: 18px;
             color: #ccc;
         }
+
+        /* Toggle control styles */
+        .toggle-control {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+
+        .toggle-control label {
+            margin-bottom: 0 !important;
+            font-weight: 500;
+            color: #fff;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 60px;
+            height: 30px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: none;
+            outline: none;
+        }
+
+        .toggle-switch.on {
+            background: rgba(76, 175, 80, 0.8);
+        }
+
+        .toggle-switch::before {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 24px;
+            height: 24px;
+            background: #fff;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .toggle-switch.on::before {
+            transform: translateX(30px);
+        }
+
+        .toggle-switch:hover {
+            transform: scale(1.05);
+        }
+
+        .toggle-switch:active {
+            transform: scale(0.95);
+        }
+
+        /* Spinner styles */
+        .spinner-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            border-radius: 10px;
+            z-index: 10;
+        }
+
+        .spinner-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+
+        .spinner-text {
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -278,6 +377,12 @@
                 <div class="photo-overlay" style="display: none;">
                     <span class="status-indicator" id="connection-status"></span>
                     <span id="photo-status">Ready</span>
+                </div>
+                <div class="spinner-overlay" id="spinner-overlay">
+                    <div class="spinner-container">
+                        <div class="spinner"></div>
+                        <div class="spinner-text">Capturing Photo...</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -324,14 +429,27 @@
                 </div>
 
                 <div class="control-group">
-                    <label>Flash Controls:</label>
-                    <div class="flash-controls">
-                        <button id="flash-on">Flash ON</button>
-                        <button id="flash-off">Flash OFF</button>
+                    <label>Image Options:</label>
+                    <div class="toggle-control">
+                        <label>Horizontal Mirror</label>
+                        <button class="toggle-switch off" id="hmirror-toggle"></button>
+                    </div>
+                    <div class="toggle-control">
+                        <label>Vertical Flip</label>
+                        <button class="toggle-switch off" id="vflip-toggle"></button>
                     </div>
                 </div>
 
-                <button id="capture-btn">Take Photo</button>
+                <div class="control-group">
+                    <label>Flash Control:</label>
+                    <div class="toggle-control">
+                        <label>Flash</label>
+                        <button class="toggle-switch off" id="flash-toggle"></button>
+                    </div>
+                </div>
+
+                <button id="reset-btn" style="background: linear-gradient(45deg, #f44336, #d32f2f); margin-bottom: 10px;">Reset to Defaults</button>
+                <button id="capture-btn">SNAPSHOT</button>
             </div>
 
             <div class="payload-panel">
@@ -360,7 +478,9 @@
                     flash: 'off',
                     brightness: 0,
                     contrast: 0,
-                    exposure: 300
+                    exposure: 300,
+                    hmirror: false,
+                    vflip: false
                 };
                 
                 this.init();
@@ -411,13 +531,22 @@
                     this.updatePayloadDisplay();
                 });
 
-                // Flash controls
-                document.getElementById('flash-on').addEventListener('click', () => {
-                    this.setFlash(true);
+                // Toggle button controls
+                document.getElementById('flash-toggle').addEventListener('click', () => {
+                    this.toggleFlash();
                 });
 
-                document.getElementById('flash-off').addEventListener('click', () => {
-                    this.setFlash(false);
+                document.getElementById('hmirror-toggle').addEventListener('click', () => {
+                    this.toggleHMirror();
+                });
+
+                document.getElementById('vflip-toggle').addEventListener('click', () => {
+                    this.toggleVFlip();
+                });
+
+                // Reset button
+                document.getElementById('reset-btn').addEventListener('click', () => {
+                    this.resetToDefaults();
                 });
 
                 // Capture button
@@ -431,28 +560,84 @@
                 console.log(`${setting} updated to ${value}`);
             }
 
-            async setFlash(on) {
-                this.currentSettings.flash = on ? 'on' : 'off';
+            toggleFlash() {
+                const isOn = this.currentSettings.flash === 'on';
+                this.currentSettings.flash = isOn ? 'off' : 'on';
+                this.updateToggleButton('flash-toggle', 'flash-text', 'Flash', !isOn);
                 this.updatePayloadDisplay();
-                console.log(`Flash ${on ? 'ON' : 'OFF'}`);
+            }
+
+            toggleHMirror() {
+                this.currentSettings.hmirror = !this.currentSettings.hmirror;
+                this.updateToggleButton('hmirror-toggle', 'hmirror-text', 'Horizontal Mirror', this.currentSettings.hmirror);
+                this.updatePayloadDisplay();
+            }
+
+            toggleVFlip() {
+                this.currentSettings.vflip = !this.currentSettings.vflip;
+                this.updateToggleButton('vflip-toggle', 'vflip-text', 'Vertical Flip', this.currentSettings.vflip);
+                this.updatePayloadDisplay();
+            }
+
+            updateToggleButton(buttonId, textId, label, isOn) {
+                const button = document.getElementById(buttonId);
+                button.className = `toggle-switch ${isOn ? 'on' : 'off'}`;
+            }
+
+            resetToDefaults() {
+                // Reset all settings to default values
+                this.currentSettings = {
+                    resolution: 'UXGA',
+                    flash: 'off',
+                    brightness: 0,
+                    contrast: 0,
+                    exposure: 300,
+                    hmirror: false,
+                    vflip: false
+                };
+
+                // Update all UI elements
+                document.getElementById('resolution-select').value = 'UXGA';
+                
+                // Reset sliders
+                document.getElementById('brightness-slider').value = 0;
+                document.getElementById('brightness-value').textContent = '0';
+                document.getElementById('contrast-slider').value = 0;
+                document.getElementById('contrast-value').textContent = '0';
+                document.getElementById('exposure-slider').value = 300;
+                document.getElementById('exposure-value').textContent = '300';
+                
+                // Reset toggle switches
+                this.updateToggleButton('flash-toggle', null, 'Flash', false);
+                this.updateToggleButton('hmirror-toggle', null, 'Horizontal Mirror', false);
+                this.updateToggleButton('vflip-toggle', null, 'Vertical Flip', false);
+                
+                // Update payload display
+                this.updatePayloadDisplay();
+                
+                console.log('Settings reset to defaults');
             }
 
             async takePhoto() {
-                const { resolution, flash, brightness, contrast, exposure } = this.currentSettings;
+                const { resolution, flash, brightness, contrast, exposure, hmirror, vflip } = this.currentSettings;
                 const url = `${this.baseUrl}/snapshot`;
                 const payload = {
                     resolution: resolution,
                     flash: flash === 'on',
                     brightness: brightness,
                     contrast: contrast,
-                    exposure: exposure
+                    exposure: exposure,
+                    hmirror: hmirror,
+                    vflip: vflip
                 };
                 
                 // Update UI to show capturing state
                 const captureBtn = document.getElementById('capture-btn');
+                const spinnerOverlay = document.getElementById('spinner-overlay');
                 const originalText = captureBtn.textContent;
                 captureBtn.textContent = 'Capturing...';
                 captureBtn.disabled = true;
+                spinnerOverlay.style.display = 'flex';
                 
                 try {
                     const response = await fetch(url, {
@@ -480,12 +665,6 @@
                         document.getElementById('connection-status').className = 'status-indicator status-connected';
                         document.getElementById('photo-status').textContent = 'Photo captured';
                         
-                        // Also create download link
-                        const link = document.createElement('a');
-                        link.href = imageUrl;
-                        link.download = `esp32-photo-${Date.now()}.jpg`;
-                        link.click();
-                        
                         console.log('Photo captured successfully');
                         this.updatePayloadDisplay();
                         
@@ -506,6 +685,7 @@
                 } finally {
                     captureBtn.textContent = originalText;
                     captureBtn.disabled = false;
+                    spinnerOverlay.style.display = 'none';
                 }
             }
 
@@ -520,6 +700,8 @@
                     brightness: this.currentSettings.brightness,
                     contrast: this.currentSettings.contrast,
                     exposure: this.currentSettings.exposure,
+                    hmirror: this.currentSettings.hmirror,
+                    vflip: this.currentSettings.vflip,
                     timestamp: new Date().toISOString(),
                     api_endpoint: `${this.baseUrl}/snapshot`,
                     method: 'POST',
