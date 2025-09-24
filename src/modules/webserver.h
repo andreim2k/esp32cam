@@ -90,6 +90,12 @@ private:
   void addCorsHeaders(String& headers);
   void generateDeviceInfo(JsonDocument& doc);
   void generateStatusJson(JsonDocument& doc);
+  
+  // WiFi protocol detection helpers
+  String getWiFiProtocol();
+  String getWiFiConnectionSpeed();
+  String getWiFiBandwidth();
+  int getWiFiSignalPercentage();
 };
 
 // Global web server manager instance

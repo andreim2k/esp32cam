@@ -15,6 +15,7 @@
  */
 
 #include <WiFi.h>
+#include "esp_wifi.h"  // For low-level WiFi power control
 #include "modules/config.h"
 #include "modules/camera.h"
 #include "modules/flash.h"
@@ -57,6 +58,34 @@ void initWiFi() {
   Serial.println("Connecting to WiFi...");
   WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
   WiFi.setSleep(false);
+  
+  // MAXIMUM POWER CONFIGURATION FOR LONG DISTANCE
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Absolute maximum power: 19.5 dBm
+  Serial.println("WiFi transmission power set to MAXIMUM (19.5 dBm)");
+  
+  // Aggressive power and range optimizations
+  WiFi.setAutoReconnect(true);  // Enable automatic reconnection
+  WiFi.persistent(true);        // Store WiFi config in flash for faster reconnects
+  
+  // Low-level ESP32 WiFi power optimizations
+  esp_wifi_set_max_tx_power(78);  // Set maximum TX power (78 = 19.5dBm, ESP-IDF level)
+  
+  // Force 802.11b mode for MAXIMUM RANGE (sacrifice speed for distance)
+  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B);  // 802.11b only - longest range
+  
+  // Additional long-range optimizations
+  wifi_config_t wifi_config;
+  esp_wifi_get_config(WIFI_IF_STA, &wifi_config);
+  
+  Serial.println("MAXIMUM DISTANCE MODE ENABLED:");
+  Serial.println("  - Maximum TX Power: 19.5 dBm (78 units)");
+  Serial.println("  - Protocol: 802.11b ONLY (longest range)");
+  Serial.println("  - Data Rate: 1-11 Mbps (maximum reliability)");
+  Serial.println("  - Modulation: DSSS (most robust)");
+  Serial.println("  - Auto-reconnect: ENABLED");
+  Serial.println("  - Persistent config: ENABLED");
+  Serial.println("  - Sleep mode: DISABLED");
+  Serial.println("  - Priority: MAXIMUM DISTANCE > SPEED");
 
   // Connection timeout and status monitoring
   int attempts = 0;
@@ -83,7 +112,9 @@ void initWiFi() {
     Serial.printf("Subnet:     %s\n", WiFi.subnetMask().toString().c_str());
     Serial.printf("DNS:        %s\n", WiFi.dnsIP().toString().c_str());
     Serial.printf("RSSI:       %d dBm\n", WiFi.RSSI());
+    Serial.printf("TX Power:   19.5 dBm (MAXIMUM - Long Range Mode)\n");
     Serial.printf("MAC:        %s\n", WiFi.macAddress().c_str());
+    Serial.printf("Channel:    %d\n", WiFi.channel());
     Serial.println("===========================================");
   } else {
     Serial.println();

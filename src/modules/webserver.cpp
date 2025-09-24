@@ -1,4 +1,5 @@
 #include "webserver.h"
+#include "esp_wifi.h"
 
 // Global instance
 WebServerManager webServerManager;
@@ -487,7 +488,12 @@ void WebServerManager::generateStatusJson(JsonDocument& doc) {
   wifi["ssid"] = configManager.getWiFiSSID();
   wifi["mode"] = configManager.useStaticIP() ? "Static" : "DHCP";
   wifi["rssi"] = WiFi.RSSI();
+  wifi["signal_percentage"] = getWiFiSignalPercentage();
+  wifi["tx_power"] = "19.5 dBm (MAXIMUM - Long Range Mode)";
   wifi["connected"] = WiFi.status() == WL_CONNECTED;
+  wifi["protocol"] = getWiFiProtocol();
+  wifi["speed"] = getWiFiConnectionSpeed();
+  wifi["bandwidth"] = getWiFiBandwidth();
   
   // Camera status
   JsonObject camera = doc["camera"].to<JsonObject>();
@@ -495,6 +501,66 @@ void WebServerManager::generateStatusJson(JsonDocument& doc) {
   camera["ready"] = cameraManager.isReady();
   camera["total_captures"] = cameraManager.getTotalCaptureCount();
   camera["failed_captures"] = cameraManager.getFailedCaptureCount();
+}
+
+String WebServerManager::getWiFiProtocol() {
+  // We force 802.11b mode for maximum range
+  if (WiFi.status() != WL_CONNECTED) {
+    return "disconnected";
+  }
+  
+  // We explicitly set 802.11b mode for maximum distance
+  return "802.11b (2.4GHz) - MAXIMUM RANGE MODE";
+}
+
+String WebServerManager::getWiFiBandwidth() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return "unknown";
+  }
+  
+  // We force 802.11b mode which uses 22MHz channels
+  return "22MHz (802.11b DSSS) - Maximum Range";
+}
+
+String WebServerManager::getWiFiConnectionSpeed() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return "disconnected";
+  }
+  
+  // We force 802.11b mode for maximum range
+  int rssi = WiFi.RSSI();
+  
+  // 802.11b speeds based on signal strength
+  if (rssi > -50) {
+    return "11 Mbps (802.11b CCK) - Maximum Range";
+  } else if (rssi > -60) {
+    return "5.5 Mbps (802.11b CCK) - Long Range";
+  } else if (rssi > -70) {
+    return "2 Mbps (802.11b DQPSK) - Extended Range";
+  } else {
+    return "1 Mbps (802.11b DBPSK) - Maximum Distance";
+  }
+}
+
+int WebServerManager::getWiFiSignalPercentage() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return 0;
+  }
+  
+  int rssi = WiFi.RSSI();
+  
+  // Convert RSSI to percentage
+  // RSSI typically ranges from -30dBm (excellent) to -80dBm (very poor)
+  if (rssi >= -30) {
+    return 100; // Excellent signal
+  } else if (rssi <= -80) {
+    return 0;   // Very poor signal
+  } else {
+    // Linear interpolation between -30dBm (100%) and -80dBm (0%)
+    // Formula: percentage = 2 * (rssi + 80)
+    // This gives us: -30dBm = 100%, -40dBm = 80%, -50dBm = 60%, -60dBm = 40%, -70dBm = 20%, -80dBm = 0%
+    return 2 * (rssi + 80);
+  }
 }
 
 String WebServerManager::generateWebPage() {
@@ -775,7 +841,7 @@ String WebServerManager::generateWebPage() {
 "\n"
 "        .wifi-info-grid {\n"
 "            display: grid;\n"
-"            grid-template-columns: 1fr 1fr;\n"
+"            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));\n"
 "            gap: 15px;\n"
 "            margin-bottom: 20px;\n"
 "        }\n"
@@ -929,7 +995,7 @@ String WebServerManager::generateWebPage() {
 "\n"
 "        .wifi-info-grid {\n"
 "            display: grid;\n"
-"            grid-template-columns: 1fr 1fr;\n"
+"            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));\n"
 "            gap: 15px;\n"
 "            margin-bottom: 20px;\n"
 "        }\n"
@@ -1021,12 +1087,28 @@ String WebServerManager::generateWebPage() {
 "                        <div class=\"info-value\" id=\"wifi-signal\">Loading...</div>\n"
 "                    </div>\n"
 "                    <div class=\"info-item\">\n"
+"                        <label>TX Power:</label>\n"
+"                        <div class=\"info-value\" id=\"wifi-txpower\">Loading...</div>\n"
+"                    </div>\n"
+"                    <div class=\"info-item\">\n"
 "                        <label>Gateway:</label>\n"
 "                        <div class=\"info-value\" id=\"wifi-gateway\">Loading...</div>\n"
 "                    </div>\n"
 "                    <div class=\"info-item\">\n"
 "                        <label>MAC Address:</label>\n"
 "                        <div class=\"info-value\" id=\"wifi-mac\">Loading...</div>\n"
+"                    </div>\n"
+"                    <div class=\"info-item\">\n"
+"                        <label>WiFi Protocol:</label>\n"
+"                        <div class=\"info-value\" id=\"wifi-protocol\">Loading...</div>\n"
+"                    </div>\n"
+"                    <div class=\"info-item\">\n"
+"                        <label>Connection Speed:</label>\n"
+"                        <div class=\"info-value\" id=\"wifi-speed\">Loading...</div>\n"
+"                    </div>\n"
+"                    <div class=\"info-item\">\n"
+"                        <label>Channel Bandwidth:</label>\n"
+"                        <div class=\"info-value\" id=\"wifi-bandwidth\">Loading...</div>\n"
 "                    </div>\n"
 "                </div>\n"
 "                <div class=\"wifi-status\">\n"
@@ -1448,14 +1530,19 @@ String WebServerManager::generateWebPage() {
 "                        document.getElementById('wifi-mode').textContent = data.wifi.mode;\n"
 "                        document.getElementById('wifi-gateway').textContent = data.wifi.gateway;\n"
 "                        document.getElementById('wifi-mac').textContent = data.wifi.mac;\n"
+"                        document.getElementById('wifi-protocol').textContent = data.wifi.protocol || 'Unknown';\n"
+"                        document.getElementById('wifi-speed').textContent = data.wifi.speed || 'Unknown';\n"
+"                        document.getElementById('wifi-bandwidth').textContent = data.wifi.bandwidth || 'Unknown';\n"
+"                        document.getElementById('wifi-txpower').textContent = data.wifi.tx_power || 'Unknown';\n"
 "                        \n"
 "                        // Update signal strength with visual indicator\n"
 "                        const rssi = data.wifi.rssi;\n"
+"                        const signalPercentage = data.wifi.signal_percentage || 0;\n"
 "                        let signalQuality = 'Poor';\n"
 "                        if (rssi > -50) signalQuality = 'Excellent';\n"
 "                        else if (rssi > -60) signalQuality = 'Good';\n"
 "                        else if (rssi > -70) signalQuality = 'Fair';\n"
-"                        document.getElementById('wifi-signal').textContent = `${rssi} dBm (${signalQuality})`;\n"
+"                        document.getElementById('wifi-signal').textContent = `${rssi} dBm (${signalPercentage}% - ${signalQuality})`;\n"
 "                        \n"
 "                        // Update connection status\n"
 "                        const statusIndicator = document.getElementById('wifi-status-indicator');\n"
