@@ -59,6 +59,9 @@ void WebServerManager::handleClient(WiFiClient& client) {
     return;
   }
   
+  // Reset watchdog for each client request
+  esp_task_wdt_reset();
+  
   total_requests++;
   last_request_time = millis();
   
@@ -90,7 +93,11 @@ void WebServerManager::handleClient(WiFiClient& client) {
 }
 
 bool WebServerManager::parseHttpRequest(WiFiClient& client, HttpRequest& request) {
-  String current_line = "";
+  // Reset watchdog during HTTP parsing
+  esp_task_wdt_reset();
+  
+  char current_line[HTTP_BUFFER_SIZE] = {0};
+  int line_pos = 0;
   bool headers_complete = false;
   int content_length = 0;
   
@@ -98,47 +105,59 @@ bool WebServerManager::parseHttpRequest(WiFiClient& client, HttpRequest& request
   request.has_content_length = false;
   request.content_length = 0;
   
+  // Initialize char arrays
+  memset(request.path, 0, sizeof(request.path));
+  memset(request.query_params, 0, sizeof(request.query_params));
+  memset(request.headers, 0, sizeof(request.headers));
+  memset(request.body, 0, sizeof(request.body));
+  
   // Parse headers
   while (client.connected() && !headers_complete) {
     if (client.available()) {
       char c = client.read();
       
       if (c == '\n') {
-        if (current_line.length() == 0) {
+        current_line[line_pos] = '\0';
+        if (line_pos == 0) {
           headers_complete = true;
         } else {
           // Process header line
-          if (current_line.startsWith("GET ")) {
+          if (strncmp(current_line, "GET ", 4) == 0) {
             request.type = REQ_GET;
-            int space_index = current_line.indexOf(' ', 4);
-            if (space_index > 0) {
-              String full_path = current_line.substring(4, space_index);
-              int question_mark = full_path.indexOf('?');
-              if (question_mark >= 0) {
-                request.path = full_path.substring(0, question_mark);
-                request.query_params = full_path.substring(question_mark + 1);
+            char* space_pos = strchr(current_line + 4, ' ');
+            if (space_pos) {
+              *space_pos = '\0';
+              char* full_path = current_line + 4;
+              char* question_mark = strchr(full_path, '?');
+              if (question_mark) {
+                *question_mark = '\0';
+                strncpy(request.path, full_path, sizeof(request.path) - 1);
+                strncpy(request.query_params, question_mark + 1, sizeof(request.query_params) - 1);
               } else {
-                request.path = full_path;
-                request.query_params = "";
+                strncpy(request.path, full_path, sizeof(request.path) - 1);
+                request.query_params[0] = '\0';
               }
             }
-          } else if (current_line.startsWith("POST ")) {
+          } else if (strncmp(current_line, "POST ", 5) == 0) {
             request.type = REQ_POST;
-            int space_index = current_line.indexOf(' ', 5);
-            if (space_index > 0) {
-              request.path = current_line.substring(5, space_index);
+            char* space_pos = strchr(current_line + 5, ' ');
+            if (space_pos) {
+              *space_pos = '\0';
+              strncpy(request.path, current_line + 5, sizeof(request.path) - 1);
             }
-          } else if (current_line.startsWith("Content-Length: ")) {
-            content_length = current_line.substring(16).toInt();
+          } else if (strncmp(current_line, "Content-Length: ", 16) == 0) {
+            content_length = atoi(current_line + 16);
             request.has_content_length = true;
             request.content_length = content_length;
           }
           
-          request.headers += current_line + "\n";
-          current_line = "";
+          // Append to headers
+          strncat(request.headers, current_line, sizeof(request.headers) - strlen(request.headers) - 1);
+          strncat(request.headers, "\n", sizeof(request.headers) - strlen(request.headers) - 1);
+          line_pos = 0;
         }
-      } else if (c != '\r') {
-        current_line += c;
+      } else if (c != '\r' && line_pos < sizeof(current_line) - 1) {
+        current_line[line_pos++] = c;
       }
     }
   }
@@ -146,14 +165,19 @@ bool WebServerManager::parseHttpRequest(WiFiClient& client, HttpRequest& request
   // Read POST body if present
   if (request.type == REQ_POST && request.has_content_length && content_length > 0) {
     int bytes_read = 0;
-    unsigned long timeout = millis() + 5000; // 5 second timeout
+    unsigned long start_time = millis();
+    const unsigned long timeout_duration = 5000; // 5 second timeout
     
-    while (bytes_read < content_length && millis() < timeout && client.connected()) {
+    while (bytes_read < content_length && 
+           (millis() - start_time) < timeout_duration &&  // Overflow-safe comparison
+           client.connected() && 
+           bytes_read < sizeof(request.body) - 1) {
       if (client.available()) {
-        request.body += (char)client.read();
+        request.body[bytes_read] = (char)client.read();
         bytes_read++;
       }
     }
+    request.body[bytes_read] = '\0';
   }
   
   return request.type != REQ_UNKNOWN;
@@ -161,11 +185,11 @@ bool WebServerManager::parseHttpRequest(WiFiClient& client, HttpRequest& request
 
 ApiResponse WebServerManager::processRequest(const HttpRequest& request) {
   // Route to appropriate handler - Only essential endpoints
-  if (request.path == "/") {
+  if (strcmp(request.path, "/") == 0) {
     return handleRoot();
-  } else if (request.path == "/status") {
+  } else if (strcmp(request.path, "/status") == 0) {
     return handleStatus();
-  } else if (request.path == "/snapshot") {
+  } else if (strcmp(request.path, "/snapshot") == 0) {
     return handleSnapshot(request);
   } else {
     return handle404();
@@ -179,12 +203,12 @@ void WebServerManager::sendResponse(WiFiClient& client, const ApiResponse& respo
                 response.status_code == 404 ? "Not Found" : "Error");
   
   // Send headers
-  client.printf("Content-Type: %s\r\n", response.content_type.c_str());
+  client.printf("Content-Type: %s\r\n", response.content_type);
   
   if (response.is_binary && response.binary_data) {
     client.printf("Content-Length: %u\r\n", response.content_length);
   } else {
-    client.printf("Content-Length: %u\r\n", response.body.length());
+    client.printf("Content-Length: %u\r\n", strlen(response.body));
   }
   
   // CORS headers
@@ -204,24 +228,23 @@ void WebServerManager::sendResponse(WiFiClient& client, const ApiResponse& respo
 ApiResponse WebServerManager::handleRoot() {
   ApiResponse response;
   response.status_code = 200;
-  response.content_type = "text/html";
+  strcpy(response.content_type, "text/html");
   response.is_binary = false;
   
-  response.body = generateWebPage();
+  generateWebPage(response.body, sizeof(response.body));
   return response;
 }
 
 ApiResponse WebServerManager::handleStatus() {
   ApiResponse response;
   response.status_code = 200;
-  response.content_type = "application/json";
+  strcpy(response.content_type, "application/json");
   response.is_binary = false;
   
   JsonDocument doc;
   generateStatusJson(doc);
   
-  response.body = "";
-  serializeJson(doc, response.body);
+  serializeJson(doc, response.body, sizeof(response.body));
   
   return response;
 }
@@ -230,13 +253,13 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest& request) {
   // This handles the legacy POST /snapshot endpoint with JSON body
   ApiResponse response;
   response.is_binary = true;
-  response.content_type = "image/jpeg";
+  strcpy(response.content_type, "image/jpeg");
   
   if (request.type != REQ_POST) {
     response.status_code = 405; // Method not allowed
     response.is_binary = false;
-    response.content_type = "application/json";
-    response.body = createErrorResponse("Method not allowed");
+    strcpy(response.content_type, "application/json");
+    createErrorResponse("Method not allowed", 405, response.body, sizeof(response.body));
     return response;
   }
   
@@ -245,8 +268,8 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest& request) {
   if (!parseJsonBody(request.body, json)) {
     response.status_code = 400;
     response.is_binary = false;
-    response.content_type = "application/json";
-    response.body = createErrorResponse("Invalid JSON");
+    strcpy(response.content_type, "application/json");
+    createErrorResponse("Invalid JSON", 400, response.body, sizeof(response.body));
     return response;
   }
   
@@ -256,8 +279,8 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest& request) {
   if (!parseRequestSettings(json, settings, use_flash)) {
     response.status_code = 400;
     response.is_binary = false;
-    response.content_type = "application/json";
-    response.body = createErrorResponse("Invalid camera settings");
+    strcpy(response.content_type, "application/json");
+    createErrorResponse("Invalid camera settings", 400, response.body, sizeof(response.body));
     return response;
   }
   
@@ -266,8 +289,8 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest& request) {
   if (!cameraManager.applySettings(settings)) {
     response.status_code = 500;
     response.is_binary = false;
-    response.content_type = "application/json";
-    response.body = createErrorResponse("Failed to apply camera settings");
+    strcpy(response.content_type, "application/json");
+    createErrorResponse("Failed to apply camera settings", 500, response.body, sizeof(response.body));
     return response;
   }
   
@@ -297,14 +320,14 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest& request) {
       cameraManager.releaseFrameBuffer(fb);
       response.status_code = 500;
       response.is_binary = false;
-      response.content_type = "application/json";
-      response.body = createErrorResponse("Out of memory");
+      strcpy(response.content_type, "application/json");
+      createErrorResponse("Out of memory", 500, response.body, sizeof(response.body));
     }
   } else {
     response.status_code = 500;
     response.is_binary = false;
-    response.content_type = "application/json";
-    response.body = createErrorResponse("Camera capture failed");
+    strcpy(response.content_type, "application/json");
+    createErrorResponse("Camera capture failed", 500, response.body, sizeof(response.body));
   }
   
   return response;
@@ -313,42 +336,35 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest& request) {
 ApiResponse WebServerManager::handle404() {
   ApiResponse response;
   response.status_code = 404;
-  response.content_type = "text/plain";
+  strcpy(response.content_type, "text/plain");
   response.is_binary = false;
-  response.body = "404 Not Found";
+  strcpy(response.body, "404 Not Found");
   
   return response;
 }
 
 // JSON utilities
-String WebServerManager::createJsonResponse(const char* status, const JsonDocument& data) {
+void WebServerManager::createJsonResponse(const char* status, JsonDocument& data, char* output, size_t max_len) {
   if (data.isNull()) {
     JsonDocument response;
     response["status"] = status;
-    
-    String result;
-    serializeJson(response, result);
-    return result;
+    serializeJson(response, output, max_len);
   } else {
     // Return the data document as is, assuming it already contains status
-    String result;
-    serializeJson(data, result);
-    return result;
+    serializeJson(data, output, max_len);
   }
 }
 
-String WebServerManager::createErrorResponse(const char* error, int code) {
+void WebServerManager::createErrorResponse(const char* error, int code, char* output, size_t max_len) {
   JsonDocument response;
   response["status"] = "error";
   response["error"] = error;
   response["code"] = code;
   
-  String result;
-  serializeJson(response, result);
-  return result;
+  serializeJson(response, output, max_len);
 }
 
-bool WebServerManager::parseJsonBody(const String& body, JsonDocument& doc) {
+bool WebServerManager::parseJsonBody(const char* body, JsonDocument& doc) {
   DeserializationError error = deserializeJson(doc, body);
   if (error) {
     Serial.printf("JSON parsing failed: %s\n", error.c_str());
@@ -372,9 +388,9 @@ bool WebServerManager::parseRequestSettings(const JsonDocument& json, CameraSett
   use_flash = false;
   
   // Parse resolution
-  if (json["resolution"].is<String>()) {
-    String res = json["resolution"].as<String>();
-    settings.resolution = cameraManager.getFrameSize(res);
+  if (json["resolution"].is<const char*>()) {
+    const char* res = json["resolution"].as<const char*>();
+    settings.resolution = cameraManager.getFrameSize(String(res));
   }
   
   // Parse numeric settings
@@ -398,9 +414,9 @@ bool WebServerManager::parseRequestSettings(const JsonDocument& json, CameraSett
 void WebServerManager::logRequest(const HttpRequest& request) {
   Serial.printf("HTTP %s %s", 
                request.type == REQ_GET ? "GET" : "POST", 
-               request.path.c_str());
-  if (!request.query_params.isEmpty()) {
-    Serial.printf("?%s", request.query_params.c_str());
+               request.path);
+  if (strlen(request.query_params) > 0) {
+    Serial.printf("?%s", request.query_params);
   }
   Serial.println();
 }
@@ -409,49 +425,73 @@ void WebServerManager::logResponse(const ApiResponse& response) {
   Serial.printf("Response: %d %s (%s)\n", 
                response.status_code,
                response.is_binary ? "Binary" : "Text",
-               response.content_type.c_str());
+               response.content_type);
 }
 
-String WebServerManager::extractQueryParam(const String& query_params, const String& param_name) {
-  if (query_params.isEmpty()) {
-    return "";
+void WebServerManager::extractQueryParam(const char* query_params, const char* param_name, char* output, size_t max_len) {
+  output[0] = '\0';
+  
+  if (strlen(query_params) == 0) {
+    return;
   }
   
-  int start = query_params.indexOf(param_name + "=");
-  if (start < 0) {
-    return "";
+  char search_str[128];
+  snprintf(search_str, sizeof(search_str), "%s=", param_name);
+  
+  char* start = strstr(query_params, search_str);
+  if (!start) {
+    return;
   }
   
-  start += param_name.length() + 1; // Move past "param="
-  int end = query_params.indexOf("&", start);
+  start += strlen(search_str); // Move past "param="
+  char* end = strchr(start, '&');
   
-  String value;
-  if (end < 0) {
-    value = query_params.substring(start);
+  size_t len;
+  if (end) {
+    len = end - start;
   } else {
-    value = query_params.substring(start, end);
+    len = strlen(start);
   }
   
-  return urlDecode(value);
+  if (len >= max_len) {
+    len = max_len - 1;
+  }
+  
+  strncpy(output, start, len);
+  output[len] = '\0';
+  
+  urlDecode(output, output, max_len);
 }
 
-String WebServerManager::urlDecode(const String& str) {
-  String decoded = "";
-  for (unsigned int i = 0; i < str.length(); i++) {
-    char c = str.charAt(i);
+void WebServerManager::urlDecode(const char* str, char* output, size_t max_len) {
+  size_t input_len = strlen(str);
+  size_t output_pos = 0;
+  
+  for (size_t i = 0; i < input_len && output_pos < max_len - 1; i++) {
+    char c = str[i];
     if (c == '+') {
-      decoded += ' ';
-    } else if (c == '%' && i + 2 < str.length()) {
-      // URL decode hex characters
-      String hex = str.substring(i + 1, i + 3);
-      char decoded_char = (char)strtol(hex.c_str(), nullptr, 16);
-      decoded += decoded_char;
+      output[output_pos++] = ' ';
+    } else if (c == '%' && i + 2 < input_len) {
+      // URL decode hex characters with validation
+      char hex[3] = {str[i + 1], str[i + 2], '\0'};
+      char* endptr;
+      long decoded_val = strtol(hex, &endptr, 16);
+      
+      // Validate hex input
+      if (endptr == hex || *endptr != '\0' || decoded_val < 0 || decoded_val > 255) {
+        // Invalid hex, skip this character
+        output[output_pos++] = c;
+        continue;
+      }
+      
+      char decoded_char = (char)decoded_val;
+      output[output_pos++] = decoded_char;
       i += 2;
     } else {
-      decoded += c;
+      output[output_pos++] = c;
     }
   }
-  return decoded;
+  output[output_pos] = '\0';
 }
 
 void WebServerManager::generateDeviceInfo(JsonDocument& doc) {
@@ -491,9 +531,14 @@ void WebServerManager::generateStatusJson(JsonDocument& doc) {
   wifi["signal_percentage"] = getWiFiSignalPercentage();
   wifi["tx_power"] = "19.5 dBm (MAXIMUM - Long Range Mode)";
   wifi["connected"] = WiFi.status() == WL_CONNECTED;
-  wifi["protocol"] = getWiFiProtocol();
-  wifi["speed"] = getWiFiConnectionSpeed();
-  wifi["bandwidth"] = getWiFiBandwidth();
+  char protocol[128], speed[128], bandwidth[128];
+  getWiFiProtocol(protocol, sizeof(protocol));
+  getWiFiConnectionSpeed(speed, sizeof(speed));
+  getWiFiBandwidth(bandwidth, sizeof(bandwidth));
+  
+  wifi["protocol"] = protocol;
+  wifi["speed"] = speed;
+  wifi["bandwidth"] = bandwidth;
   
   // Camera status
   JsonObject camera = doc["camera"].to<JsonObject>();
@@ -503,28 +548,36 @@ void WebServerManager::generateStatusJson(JsonDocument& doc) {
   camera["failed_captures"] = cameraManager.getFailedCaptureCount();
 }
 
-String WebServerManager::getWiFiProtocol() {
+void WebServerManager::getWiFiProtocol(char* output, size_t max_len) {
   // We force 802.11b mode for maximum range
   if (WiFi.status() != WL_CONNECTED) {
-    return "disconnected";
+    strncpy(output, "disconnected", max_len - 1);
+    output[max_len - 1] = '\0';
+    return;
   }
   
   // We explicitly set 802.11b mode for maximum distance
-  return "802.11b (2.4GHz) - MAXIMUM RANGE MODE";
+  strncpy(output, "802.11b (2.4GHz) - MAXIMUM RANGE MODE", max_len - 1);
+  output[max_len - 1] = '\0';
 }
 
-String WebServerManager::getWiFiBandwidth() {
+void WebServerManager::getWiFiBandwidth(char* output, size_t max_len) {
   if (WiFi.status() != WL_CONNECTED) {
-    return "unknown";
+    strncpy(output, "unknown", max_len - 1);
+    output[max_len - 1] = '\0';
+    return;
   }
   
   // We force 802.11b mode which uses 22MHz channels
-  return "22MHz (802.11b DSSS) - Maximum Range";
+  strncpy(output, "22MHz (802.11b DSSS) - Maximum Range", max_len - 1);
+  output[max_len - 1] = '\0';
 }
 
-String WebServerManager::getWiFiConnectionSpeed() {
+void WebServerManager::getWiFiConnectionSpeed(char* output, size_t max_len) {
   if (WiFi.status() != WL_CONNECTED) {
-    return "disconnected";
+    strncpy(output, "disconnected", max_len - 1);
+    output[max_len - 1] = '\0';
+    return;
   }
   
   // We force 802.11b mode for maximum range
@@ -532,14 +585,15 @@ String WebServerManager::getWiFiConnectionSpeed() {
   
   // 802.11b speeds based on signal strength
   if (rssi > -50) {
-    return "11 Mbps (802.11b CCK) - Maximum Range";
+    strncpy(output, "11 Mbps (802.11b CCK) - Maximum Range", max_len - 1);
   } else if (rssi > -60) {
-    return "5.5 Mbps (802.11b CCK) - Long Range";
+    strncpy(output, "5.5 Mbps (802.11b CCK) - Long Range", max_len - 1);
   } else if (rssi > -70) {
-    return "2 Mbps (802.11b DQPSK) - Extended Range";
+    strncpy(output, "2 Mbps (802.11b DQPSK) - Extended Range", max_len - 1);
   } else {
-    return "1 Mbps (802.11b DBPSK) - Maximum Distance";
+    strncpy(output, "1 Mbps (802.11b DBPSK) - Maximum Distance", max_len - 1);
   }
+  output[max_len - 1] = '\0';
 }
 
 int WebServerManager::getWiFiSignalPercentage() {
@@ -563,9 +617,9 @@ int WebServerManager::getWiFiSignalPercentage() {
   }
 }
 
-String WebServerManager::generateWebPage() {
+void WebServerManager::generateWebPage(char* output, size_t max_len) {
   // Serve the updated HTML content with toggle buttons and spinner
-  return "<!DOCTYPE html>\n"
+  const char* html_content = "<!DOCTYPE html>\n"
 "<html lang=\"en\">\n"
 "<head>\n"
 "    <meta charset=\"UTF-8\">\n"
@@ -1595,4 +1649,8 @@ String WebServerManager::generateWebPage() {
 "    </script>\n"
 "</body>\n"
 "</html>";
+  
+  // Copy HTML content to output buffer with size limit
+  strncpy(output, html_content, max_len - 1);
+  output[max_len - 1] = '\0';
 }

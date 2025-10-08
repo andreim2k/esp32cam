@@ -10,7 +10,8 @@ CameraManager::CameraManager() :
   capture_count(0),
   failed_capture_count(0),
   last_capture_time(0),
-  last_frame_size(0) {
+  last_frame_size(0),
+  frame_buffer_active(false) {
   
   // Initialize default settings
   default_settings.resolution = FRAMESIZE_UXGA;
@@ -28,24 +29,34 @@ CameraManager::CameraManager() :
 bool CameraManager::begin(uint8_t jpeg_quality, framesize_t default_resolution) {
   Serial.println("Initializing camera...");
   
-  if (!configureCamera(jpeg_quality, default_resolution)) {
-    Serial.println("Failed to configure camera");
-    return false;
+  // Retry camera initialization up to 3 times
+  const int max_retries = 3;
+  for (int retry = 0; retry < max_retries; retry++) {
+    if (retry > 0) {
+      Serial.printf("Camera initialization retry %d/%d...\n", retry + 1, max_retries);
+      delay(1000); // Wait before retry
+    }
+    
+    if (configureCamera(jpeg_quality, default_resolution)) {
+      if (initializeCameraSensor()) {
+        current_resolution = default_resolution;
+        original_resolution = default_resolution;
+        camera_ready = true;
+        
+        Serial.println("Camera initialization complete");
+        printCameraInfo();
+        return true;
+      } else {
+        Serial.printf("Camera sensor initialization failed (attempt %d)\n", retry + 1);
+      }
+    } else {
+      Serial.printf("Camera configuration failed (attempt %d)\n", retry + 1);
+    }
   }
   
-  if (!initializeCameraSensor()) {
-    Serial.println("Failed to initialize camera sensor");
-    return false;
-  }
-  
-  current_resolution = default_resolution;
-  original_resolution = default_resolution;
-  camera_ready = true;
-  
-  Serial.println("Camera initialization complete");
-  printCameraInfo();
-  
-  return true;
+  Serial.println("CRITICAL: Camera initialization failed after all retries");
+  camera_ready = false;
+  return false;
 }
 
 bool CameraManager::configureCamera(uint8_t jpeg_quality, framesize_t resolution) {
@@ -164,18 +175,21 @@ framesize_t CameraManager::getFrameSize(const String& size_param) {
   return FRAMESIZE_VGA; // Default
 }
 
-String CameraManager::getResolutionString(framesize_t resolution) {
+void CameraManager::getResolutionString(framesize_t resolution, char* output, size_t max_len) {
+  const char* resolution_str;
   switch(resolution) {
-    case FRAMESIZE_UXGA: return "UXGA (1600x1200)";
-    case FRAMESIZE_SXGA: return "SXGA (1280x1024)";
-    case FRAMESIZE_XGA: return "XGA (1024x768)";
-    case FRAMESIZE_SVGA: return "SVGA (800x600)";
-    case FRAMESIZE_VGA: return "VGA (640x480)";
-    case FRAMESIZE_CIF: return "CIF (400x296)";
-    case FRAMESIZE_QVGA: return "QVGA (320x240)";
-    case FRAMESIZE_HQVGA: return "HQVGA (240x176)";
-    default: return "Unknown";
+    case FRAMESIZE_UXGA: resolution_str = "UXGA (1600x1200)"; break;
+    case FRAMESIZE_SXGA: resolution_str = "SXGA (1280x1024)"; break;
+    case FRAMESIZE_XGA: resolution_str = "XGA (1024x768)"; break;
+    case FRAMESIZE_SVGA: resolution_str = "SVGA (800x600)"; break;
+    case FRAMESIZE_VGA: resolution_str = "VGA (640x480)"; break;
+    case FRAMESIZE_CIF: resolution_str = "CIF (400x296)"; break;
+    case FRAMESIZE_QVGA: resolution_str = "QVGA (320x240)"; break;
+    case FRAMESIZE_HQVGA: resolution_str = "HQVGA (240x176)"; break;
+    default: resolution_str = "Unknown"; break;
   }
+  strncpy(output, resolution_str, max_len - 1);
+  output[max_len - 1] = '\0';
 }
 
 bool CameraManager::setResolution(framesize_t resolution) {
@@ -190,7 +204,9 @@ bool CameraManager::setResolution(framesize_t resolution) {
   }
   
   current_resolution = resolution;
-  Serial.printf("Resolution changed to: %s\n", getResolutionString(resolution).c_str());
+  char resolution_str[32];
+  getResolutionString(resolution, resolution_str, sizeof(resolution_str));
+  Serial.printf("Resolution changed to: %s\n", resolution_str);
   return true;
 }
 
@@ -205,9 +221,16 @@ camera_fb_t* CameraManager::captureFrame() {
     return nullptr;
   }
   
+  if (frame_buffer_active) {
+    Serial.println("WARNING: Previous frame buffer not released");
+    logCaptureResult(CAPTURE_FAILED);
+    return nullptr;
+  }
+  
   camera_fb_t* fb = esp_camera_fb_get();
   
   if (fb) {
+    frame_buffer_active = true;
     capture_count++;
     last_capture_time = millis();
     last_frame_size = fb->len;
@@ -223,6 +246,12 @@ camera_fb_t* CameraManager::captureFrame() {
 camera_fb_t* CameraManager::captureWithFlash(bool use_flash) {
   if (!camera_ready) {
     logCaptureResult(CAPTURE_CAMERA_NOT_READY);
+    return nullptr;
+  }
+  
+  if (frame_buffer_active) {
+    Serial.println("WARNING: Previous frame buffer not released");
+    logCaptureResult(CAPTURE_FAILED);
     return nullptr;
   }
   
@@ -263,6 +292,7 @@ camera_fb_t* CameraManager::captureWithFlash(bool use_flash) {
   camera_fb_t* fb = esp_camera_fb_get();
   
   if (fb) {
+    frame_buffer_active = true;
     capture_count++;
     last_capture_time = millis();
     last_frame_size = fb->len;
@@ -286,20 +316,24 @@ CaptureResult CameraManager::captureToBuffer(uint8_t** buffer, size_t* buffer_si
   // Allocate buffer and copy data
   *buffer = (uint8_t*)malloc(fb->len);
   if (!*buffer) {
-    esp_camera_fb_return(fb);
+    releaseFrameBuffer(fb);
     return CAPTURE_OUT_OF_MEMORY;
   }
   
   memcpy(*buffer, fb->buf, fb->len);
   *buffer_size = fb->len;
   
-  esp_camera_fb_return(fb);
+  releaseFrameBuffer(fb);
   return CAPTURE_SUCCESS;
 }
 
 void CameraManager::releaseFrameBuffer(camera_fb_t* fb) {
-  if (fb) {
+  if (fb && frame_buffer_active) {
     esp_camera_fb_return(fb);
+    frame_buffer_active = false;
+  } else if (fb && !frame_buffer_active) {
+    Serial.println("WARNING: Attempted to release frame buffer that wasn't active");
+    esp_camera_fb_return(fb); // Still release it to prevent leaks
   }
 }
 
@@ -311,6 +345,9 @@ bool CameraManager::applySettings(const CameraSettings& settings) {
   
   sensor_t* s = getSensor();
   if (!s) return false;
+  
+  char resolution_str[32];
+  getResolutionString(settings.resolution, resolution_str, sizeof(resolution_str));
   
   // Store original resolution to restore later if needed
   framesize_t original_res = current_resolution;
@@ -365,7 +402,7 @@ bool CameraManager::applySettings(const CameraSettings& settings) {
   }
   
   Serial.printf("Applied camera settings - Res: %s, Brightness: %d, Contrast: %d, Gain: %d\n", 
-               getResolutionString(settings.resolution).c_str(), 
+               resolution_str, 
                settings.brightness, settings.contrast, settings.gain);
   
   return true;
@@ -512,7 +549,9 @@ void CameraManager::printCameraInfo() {
   if (s) {
     Serial.println("========== Camera Information ==========");
     Serial.printf("Camera ID: 0x%02X\n", s->id.PID);
-    Serial.printf("Current Resolution: %s\n", getResolutionString(current_resolution).c_str());
+    char resolution_str[32];
+    getResolutionString(current_resolution, resolution_str, sizeof(resolution_str));
+    Serial.printf("Current Resolution: %s\n", resolution_str);
     Serial.printf("PSRAM Available: %s\n", psramFound() ? "Yes" : "No");
     Serial.printf("Total Captures: %u\n", capture_count);
     Serial.printf("Failed Captures: %u\n", failed_capture_count);

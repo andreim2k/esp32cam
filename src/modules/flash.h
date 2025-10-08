@@ -43,7 +43,7 @@ public:
   // Flash control
   bool setFlash(bool enable);
   bool setFlashDuty(uint8_t duty);
-  bool setFlashPreset(const String& preset);
+  bool setFlashPreset(const char* preset);
   uint8_t getCurrentDuty() const { return current_duty; }
   bool isFlashOn() const { return current_duty > 0; }
   
@@ -57,7 +57,7 @@ public:
   // Auto flash logic
   bool shouldUseFlash();
   bool shouldUseFlash(camera_fb_t* fb);
-  FlashMode determineFlashMode(const String& mode_param);
+  FlashMode determineFlashMode(const char* mode_param);
   
   // Status and statistics
   FlashStatus getStatus() const;

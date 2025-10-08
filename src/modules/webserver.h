@@ -10,6 +10,10 @@
 
 #define HTTP_BUFFER_SIZE 1024
 #define JSON_BUFFER_SIZE 2048
+#define MAX_PATH_LENGTH 256
+#define MAX_HEADERS_LENGTH 2048
+#define MAX_BODY_LENGTH 4096
+#define MAX_QUERY_LENGTH 512
 
 enum RequestType {
   REQ_GET,
@@ -19,18 +23,18 @@ enum RequestType {
 
 struct HttpRequest {
   RequestType type;
-  String path;
-  String query_params;
-  String headers;
-  String body;
+  char path[MAX_PATH_LENGTH];
+  char query_params[MAX_QUERY_LENGTH];
+  char headers[MAX_HEADERS_LENGTH];
+  char body[MAX_BODY_LENGTH];
   bool has_content_length;
   int content_length;
 };
 
 struct ApiResponse {
   int status_code;
-  String content_type;
-  String body;
+  char content_type[64];
+  char body[JSON_BUFFER_SIZE];
   size_t content_length;
   uint8_t* binary_data;
   bool is_binary;
@@ -59,12 +63,12 @@ public:
   ApiResponse handle404();
   
   // JSON utilities
-  String createJsonResponse(const char* status, const JsonDocument& data = JsonDocument());
-  String createErrorResponse(const char* error, int code = 500);
-  bool parseJsonBody(const String& body, JsonDocument& doc);
+  void createJsonResponse(const char* status, JsonDocument& data, char* output, size_t max_len);
+  void createErrorResponse(const char* error, int code, char* output, size_t max_len);
+  bool parseJsonBody(const char* body, JsonDocument& doc);
   
   // Web page generation
-  String generateWebPage();
+  void generateWebPage(char* output, size_t max_len);
   
   // Camera settings from JSON
   bool parseRequestSettings(const JsonDocument& json, CameraSettings& settings, bool& use_flash);
@@ -85,16 +89,16 @@ private:
   // Internal helpers
   void logRequest(const HttpRequest& request);
   void logResponse(const ApiResponse& response);
-  String extractQueryParam(const String& query_params, const String& param_name);
-  String urlDecode(const String& str);
-  void addCorsHeaders(String& headers);
+  void extractQueryParam(const char* query_params, const char* param_name, char* output, size_t max_len);
+  void urlDecode(const char* str, char* output, size_t max_len);
+  void addCorsHeaders(char* headers, size_t max_len);
   void generateDeviceInfo(JsonDocument& doc);
   void generateStatusJson(JsonDocument& doc);
   
   // WiFi protocol detection helpers
-  String getWiFiProtocol();
-  String getWiFiConnectionSpeed();
-  String getWiFiBandwidth();
+  void getWiFiProtocol(char* output, size_t max_len);
+  void getWiFiConnectionSpeed(char* output, size_t max_len);
+  void getWiFiBandwidth(char* output, size_t max_len);
   int getWiFiSignalPercentage();
 };
 

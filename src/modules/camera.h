@@ -53,7 +53,7 @@ public:
   
   // Resolution management
   framesize_t getFrameSize(const String& size_param);
-  String getResolutionString(framesize_t resolution);
+  void getResolutionString(framesize_t resolution, char* output, size_t max_len);
   bool setResolution(framesize_t resolution);
   framesize_t getCurrentResolution();
   
@@ -100,6 +100,9 @@ private:
   
   // Default camera settings
   CameraSettings default_settings;
+  
+  // Frame buffer state tracking
+  bool frame_buffer_active;
   
   // Internal methods
   bool initializeCameraSensor();

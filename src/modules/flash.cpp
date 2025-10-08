@@ -80,25 +80,25 @@ bool FlashManager::setFlashDuty(uint8_t duty) {
   return true;
 }
 
-bool FlashManager::setFlashPreset(const String& preset) {
+bool FlashManager::setFlashPreset(const char* preset) {
   uint8_t duty = FLASH_OFF;
   
-  if (preset == "off") {
+  if (strcmp(preset, "off") == 0) {
     duty = FLASH_OFF;
-  } else if (preset == "low") {
+  } else if (strcmp(preset, "low") == 0) {
     duty = FLASH_LOW;
-  } else if (preset == "medium") {
+  } else if (strcmp(preset, "medium") == 0) {
     duty = FLASH_MEDIUM;
-  } else if (preset == "high") {
+  } else if (strcmp(preset, "high") == 0) {
     duty = FLASH_HIGH;
   } else {
-    Serial.printf("Unknown flash preset: %s\n", preset.c_str());
+    Serial.printf("Unknown flash preset: %s\n", preset);
     return false;
   }
   
   bool result = setFlashDuty(duty);
   if (result) {
-    Serial.printf("Flash preset '%s' applied: duty=%d\n", preset.c_str(), duty);
+    Serial.printf("Flash preset '%s' applied: duty=%d\n", preset, duty);
   }
   
   return result;
@@ -115,8 +115,8 @@ bool FlashManager::isLightLow() {
     return cached_light_result;
   }
   
-  // Get a frame for light analysis
-  camera_fb_t* fb = esp_camera_fb_get();
+  // Get a frame for light analysis using CameraManager
+  camera_fb_t* fb = cameraManager.captureFrame();
   if (!fb) {
     Serial.println("Light check failed: Could not capture frame");
     cached_light_result = true; // Default to flash ON if can't check
@@ -125,7 +125,7 @@ bool FlashManager::isLightLow() {
   }
   
   bool result = isLightLow(fb);
-  esp_camera_fb_return(fb);
+  cameraManager.releaseFrameBuffer(fb);
   
   return result;
 }
@@ -191,10 +191,10 @@ bool FlashManager::shouldUseFlash(camera_fb_t* fb) {
   return isLightLow(fb);
 }
 
-FlashMode FlashManager::determineFlashMode(const String& mode_param) {
-  if (mode_param == "1" || mode_param == "on" || mode_param == "true") {
+FlashMode FlashManager::determineFlashMode(const char* mode_param) {
+  if (strcmp(mode_param, "1") == 0 || strcmp(mode_param, "on") == 0 || strcmp(mode_param, "true") == 0) {
     return FLASH_MODE_ON;
-  } else if (mode_param == "auto") {
+  } else if (strcmp(mode_param, "auto") == 0) {
     return FLASH_MODE_AUTO;
   } else {
     return FLASH_MODE_OFF;
@@ -264,8 +264,8 @@ bool FlashManager::captureWithAutoFlash(camera_fb_t** fb) {
     delay(200); // Stabilization delay
   }
   
-  // Capture frame
-  *fb = esp_camera_fb_get();
+  // Capture frame using CameraManager
+  *fb = cameraManager.captureFrame();
   
   if (use_flash) {
     // Keep flash on briefly for exposure, then turn off
