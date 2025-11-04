@@ -471,7 +471,7 @@
     <script>
         class ESP32CameraController {
             constructor() {
-                this.baseUrl = 'http://192.168.50.3';
+                this.baseUrl = window.location.origin; // Dynamic: use current host/port
                 this.isConnected = false;
                 this.currentSettings = {
                     resolution: 'UXGA',

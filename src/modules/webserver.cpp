@@ -184,6 +184,19 @@ bool WebServerManager::parseHttpRequest(WiFiClient& client, HttpRequest& request
 }
 
 ApiResponse WebServerManager::processRequest(const HttpRequest& request) {
+  // Extract Authorization header for API key validation
+  char auth_header[256] = {0};
+  extractQueryParam(request.headers, "Authorization:", auth_header, sizeof(auth_header)); // Assuming headers contain it; parse properly if needed
+  const char* api_key = configManager.getAPIKey();
+  if (strlen(api_key) > 0 && !configManager.isAPIKeyValid(auth_header)) {
+    ApiResponse error_response;
+    error_response.status_code = 401;
+    strcpy(error_response.content_type, "application/json");
+    error_response.is_binary = false;
+    createErrorResponse("Unauthorized: Invalid API key", 401, error_response.body, sizeof(error_response.body));
+    return error_response;
+  }
+
   // Route to appropriate handler - Only essential endpoints
   if (strcmp(request.path, "/") == 0) {
     return handleRoot();
@@ -318,6 +331,7 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest& request) {
       cameraManager.releaseFrameBuffer(fb);
     } else {
       cameraManager.releaseFrameBuffer(fb);
+      if (response.binary_data) free(response.binary_data); // Explicit free if somehow set
       response.status_code = 500;
       response.is_binary = false;
       strcpy(response.content_type, "application/json");
