@@ -274,19 +274,24 @@ ApiResponse WebServerManager::processRequest(const HttpRequest &request) {
       len--;
     }
 
-    const char *stored_api_key = configManager.getAPIKey();
-    if (strlen(stored_api_key) > 0 &&
-        !configManager.isAPIKeyValid(api_key_value)) {
-      ApiResponse error_response;
-      error_response.status_code = 401;
-      strncpy(error_response.content_type, "application/json",
-              sizeof(error_response.content_type) - 1);
-      error_response.content_type[sizeof(error_response.content_type) - 1] =
-          '\0';
-      error_response.is_binary = false;
-      createErrorResponse("Unauthorized: Invalid or missing API key", 401,
-                          error_response.body, sizeof(error_response.body));
-      return error_response;
+    // Only validate API key if one is provided in the request
+    // This allows direct API calls without API key, while still supporting
+    // API key authentication when provided (e.g., from web UI)
+    if (strlen(api_key_value) > 0) {
+      const char *stored_api_key = configManager.getAPIKey();
+      if (strlen(stored_api_key) > 0 &&
+          !configManager.isAPIKeyValid(api_key_value)) {
+        ApiResponse error_response;
+        error_response.status_code = 401;
+        strncpy(error_response.content_type, "application/json",
+                sizeof(error_response.content_type) - 1);
+        error_response.content_type[sizeof(error_response.content_type) - 1] =
+            '\0';
+        error_response.is_binary = false;
+        createErrorResponse("Unauthorized: Invalid API key", 401,
+                            error_response.body, sizeof(error_response.body));
+        return error_response;
+      }
     }
   }
 
