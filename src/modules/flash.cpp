@@ -1,4 +1,5 @@
 #include "flash.h"
+#include "camera.h"
 
 // Global instance
 FlashManager flashManager;

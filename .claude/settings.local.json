@@ -3,7 +3,8 @@
     "allow": [
       "Bash(git clean:*)",
       "Bash(pio run:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
