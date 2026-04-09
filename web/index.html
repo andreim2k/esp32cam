@@ -390,26 +390,40 @@
         <div class="controls-section">
             <div class="control-panel">
                 <h2>WiFi Configuration</h2>
+                
                 <div class="control-group">
                     <label for="wifi-ssid">New SSID:</label>
-                    <input type="text" id="wifi-ssid" placeholder="Network name" style="width: 100%; padding: 12px; margin-bottom: 15px; border: none; border-radius: 8px; background: rgba(255, 255, 255, 0.2); color: #fff; font-size: 14px;">
+                    <input type="text" id="wifi-ssid" placeholder="Network name" class="slider" style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);">
                 </div>
-                <div class="control-group">
+
+                <div class="control-group" style="position: relative;">
                     <label for="wifi-password">Password:</label>
-                    <input type="password" id="wifi-password" placeholder="Password" style="width: 100%; padding: 12px; margin-bottom: 15px; border: none; border-radius: 8px; background: rgba(255, 255, 255, 0.2); color: #fff; font-size: 14px;">
+                    <div style="display: flex; gap: 10px;">
+                        <input type="password" id="wifi-password" placeholder="Password" class="slider" style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); flex-grow: 1;">
+                        <button id="wifi-toggle-pw" style="width: 80px; padding: 10px; margin: 0; font-size: 12px; background: rgba(255, 255, 255, 0.2);">SHOW</button>
+                    </div>
                 </div>
+
                 <div class="control-group">
                     <label for="wifi-bandwidth">Bandwidth:</label>
-                    <select id="wifi-bandwidth">
-                        <option value="max">Max Range (Slowest) - 802.11b</option>
-                        <option value="balanced">Balanced - 802.11g</option>
-                        <option value="high">High Speed - 802.11n</option>
+                    <select id="wifi-bandwidth" style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);">
+                        <option value="max">📡 Max Range (Slowest) - 802.11b</option>
+                        <option value="balanced">⚖️ Balanced - 802.11g</option>
+                        <option value="high">⚡ High Speed - 802.11n</option>
                     </select>
                 </div>
+
                 <button id="apply-wifi-btn">APPLY WIFI SETTINGS</button>
             </div>
 
             <script>
+                // WiFi Config
+                document.getElementById('wifi-toggle-pw').addEventListener('click', () => {
+                    const inp = document.getElementById('wifi-password');
+                    if (inp.type === 'password') { inp.type = 'text'; }
+                    else { inp.type = 'password'; }
+                });
+
                 document.getElementById('apply-wifi-btn').addEventListener('click', async () => {
                     const ssid = document.getElementById('wifi-ssid').value.trim();
                     const password = document.getElementById('wifi-password').value;
