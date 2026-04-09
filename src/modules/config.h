@@ -9,7 +9,7 @@
 // EEPROM Memory Layout
 #define EEPROM_SIZE 512
 #define CONFIG_MAGIC 0xCAFE
-#define CONFIG_VERSION 2
+#define CONFIG_VERSION 3
 
 // Memory offsets
 #define OFFSET_MAGIC 0
