@@ -409,6 +409,38 @@
                 <button id="apply-wifi-btn">APPLY WIFI SETTINGS</button>
             </div>
 
+            <script>
+                document.getElementById('apply-wifi-btn').addEventListener('click', async () => {
+                    const ssid = document.getElementById('wifi-ssid').value.trim();
+                    const password = document.getElementById('wifi-password').value;
+                    const bandwidth = document.getElementById('wifi-bandwidth').value;
+                    
+                    const mapping = { 'max': 0, 'balanced': 1, 'high': 2 };
+                    const payload = {
+                        bandwidth: mapping[bandwidth]
+                    };
+                    if (ssid) payload.ssid = ssid;
+                    if (password) payload.password = password;
+
+                    try {
+                        const response = await fetch('/wifi', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        const result = await response.json();
+                        if (result.status === 'success') {
+                            alert('WiFi settings saved! Reconnecting...');
+                            setTimeout(() => location.reload(), 2000);
+                        } else {
+                            alert('Error: ' + (result.error || 'Failed to update settings'));
+                        }
+                    } catch (err) {
+                        alert('Connection error. Device may be reconnecting.');
+                    }
+                });
+            </script>
+
             <div class="control-panel">
                 <h2>Camera Controls</h2>
                 
