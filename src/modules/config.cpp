@@ -143,13 +143,13 @@ void ConfigManager::resetToDefaults() {
 
   strncpy(config.device_name, DEFAULT_DEVICE_NAME, DEVICE_NAME_MAX_LEN - 1);
 
-  // Default to DHCP (no static IP)
-  config.use_static_ip = false;
-  config.static_ip = IPAddress(0, 0, 0, 0);
-  config.gateway = IPAddress(0, 0, 0, 0);
-  config.subnet = IPAddress(0, 0, 0, 0);
-  config.dns_primary = IPAddress(8, 8, 8, 8);
-  config.dns_secondary = IPAddress(8, 8, 4, 4);
+  // Default to Static IP 192.168.50.3
+  config.use_static_ip = true;
+  config.static_ip = IPAddress(192, 168, 50, 3);
+  config.gateway = IPAddress(192, 168, 50, 1);
+  config.subnet = IPAddress(255, 255, 255, 0);
+  config.dns_primary = IPAddress(192, 168, 50, 1);
+  config.dns_secondary = IPAddress(8, 8, 8, 8);
 
   config.jpeg_quality = DEFAULT_JPEG_QUALITY;
   config.default_resolution = DEFAULT_RESOLUTION;

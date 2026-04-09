@@ -420,10 +420,11 @@ void loop() {
   if (wifi_reconnect_requested) {
     wifi_reconnect_requested = false;
     Serial.println("WiFi reconnect requested by web UI...");
+    Serial.printf("Using saved credentials - SSID: %s\n", configManager.getWiFiSSID());
     WiFi.disconnect();
     delay(500);
     applyWiFiBandwidthMode();
-    WiFi.begin(DEFAULT_SSID, DEFAULT_PASSWORD);
+    WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
   }
 
   // Handle incoming HTTP requests using the web server manager

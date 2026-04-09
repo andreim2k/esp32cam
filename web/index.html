@@ -389,6 +389,27 @@
 
         <div class="controls-section">
             <div class="control-panel">
+                <h2>WiFi Configuration</h2>
+                <div class="control-group">
+                    <label for="wifi-ssid">New SSID:</label>
+                    <input type="text" id="wifi-ssid" placeholder="Network name" style="width: 100%; padding: 12px; margin-bottom: 15px; border: none; border-radius: 8px; background: rgba(255, 255, 255, 0.2); color: #fff; font-size: 14px;">
+                </div>
+                <div class="control-group">
+                    <label for="wifi-password">Password:</label>
+                    <input type="password" id="wifi-password" placeholder="Password" style="width: 100%; padding: 12px; margin-bottom: 15px; border: none; border-radius: 8px; background: rgba(255, 255, 255, 0.2); color: #fff; font-size: 14px;">
+                </div>
+                <div class="control-group">
+                    <label for="wifi-bandwidth">Bandwidth:</label>
+                    <select id="wifi-bandwidth">
+                        <option value="max">Max Range (Slowest) - 802.11b</option>
+                        <option value="balanced">Balanced - 802.11g</option>
+                        <option value="high">High Speed - 802.11n</option>
+                    </select>
+                </div>
+                <button id="apply-wifi-btn">APPLY WIFI SETTINGS</button>
+            </div>
+
+            <div class="control-panel">
                 <h2>Camera Controls</h2>
                 
                 <div class="control-group">
