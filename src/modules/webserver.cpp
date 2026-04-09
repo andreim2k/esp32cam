@@ -530,6 +530,8 @@ ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
   }
 
   bool ssid_changed = false;
+  bool password_changed = false;
+  bool bandwidth_changed = false;
   bool any_valid = false;
 
   if (json.containsKey("ssid") && json["ssid"].is<const char*>()) {
@@ -544,6 +546,7 @@ ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
   if (json.containsKey("password") && json["password"].is<const char*>()) {
     const char *p = json["password"];
     if (p && strlen(p) <= 63) {
+      password_changed = strcmp(p, configManager.getWiFiPassword()) != 0;
       configManager.setWiFiCredentials(configManager.getWiFiSSID(), p);
       any_valid = true;
     }
@@ -552,6 +555,7 @@ ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
   if (json.containsKey("bandwidth") && json["bandwidth"].is<int>()) {
     uint8_t bw = json["bandwidth"];
     if (bw <= WIFI_BW_MODE_HT40) {
+      bandwidth_changed = (bw != configManager.getWiFiBandwidthMode());
       configManager.setWiFiBandwidthMode(bw);
       any_valid = true;
     }
@@ -568,7 +572,20 @@ ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
 
   JsonDocument resp;
   resp["status"] = "success";
-  resp["message"] = ssid_changed ? "SSID changed, reconnecting..." : "Settings saved, reconnecting...";
+
+  // Build detailed message about what was saved
+  char message[256] = {0};
+  if (ssid_changed || password_changed || bandwidth_changed) {
+    snprintf(message, sizeof(message),
+             "✓ Settings saved to EEPROM%s%s%s - Device will reconnect in 2 seconds",
+             ssid_changed ? " (SSID)" : "",
+             password_changed ? " (Password)" : "",
+             bandwidth_changed ? " (Bandwidth)" : "");
+  } else {
+    snprintf(message, sizeof(message), "✓ Settings confirmed and saved to EEPROM - Reconnecting...");
+  }
+
+  resp["message"] = message;
   resp["ssid_changed"] = ssid_changed;
   serializeJson(resp, response.body, sizeof(response.body));
   return response;
@@ -790,7 +807,7 @@ void WebServerManager::generateStatusJson(JsonDocument &doc) {
   wifi["mode"] = configManager.useStaticIP() ? "Static" : "DHCP";
   wifi["rssi"] = WiFi.RSSI();
   wifi["signal_percentage"] = getWiFiSignalPercentage();
-  wifi["tx_power"] = "19.5 dBm (MAXIMUM - Long Range Mode)";
+  wifi["tx_power"] = "19.5 dBm (MAXIMUM - ESP32 Regulatory Limit)";
   wifi["connected"] = WiFi.status() == WL_CONNECTED;
   char protocol[128], speed[128], bandwidth[128];
   getWiFiProtocol(protocol, sizeof(protocol));
@@ -813,15 +830,20 @@ void WebServerManager::generateStatusJson(JsonDocument &doc) {
 }
 
 void WebServerManager::getWiFiProtocol(char *output, size_t max_len) {
-  // We force 802.11b mode for maximum range
   if (WiFi.status() != WL_CONNECTED) {
     strncpy(output, "disconnected", max_len - 1);
     output[max_len - 1] = '\0';
     return;
   }
 
-  // We explicitly set 802.11b mode for maximum distance
-  strncpy(output, "802.11b (2.4GHz) - MAXIMUM RANGE MODE", max_len - 1);
+  // Report protocol based on actual bandwidth mode setting
+  uint8_t bwMode = configManager.getWiFiBandwidthMode();
+  if (bwMode == WIFI_BW_MODE_11B) {
+    strncpy(output, "802.11b (2.4GHz) - MAXIMUM RANGE MODE", max_len - 1);
+  } else {
+    // HT20 and HT40 use 802.11bgn
+    strncpy(output, "802.11bgn (2.4GHz) - Mixed Mode", max_len - 1);
+  }
   output[max_len - 1] = '\0';
 }
 
@@ -850,18 +872,43 @@ void WebServerManager::getWiFiConnectionSpeed(char *output, size_t max_len) {
     return;
   }
 
-  // We force 802.11b mode for maximum range
   int rssi = WiFi.RSSI();
+  uint8_t bwMode = configManager.getWiFiBandwidthMode();
 
-  // 802.11b speeds based on signal strength
-  if (rssi > -50) {
-    strncpy(output, "11 Mbps (802.11b CCK) - Maximum Range", max_len - 1);
-  } else if (rssi > -60) {
-    strncpy(output, "5.5 Mbps (802.11b CCK) - Long Range", max_len - 1);
-  } else if (rssi > -70) {
-    strncpy(output, "2 Mbps (802.11b DQPSK) - Extended Range", max_len - 1);
+  // Speed varies by bandwidth mode and signal strength
+  if (bwMode == WIFI_BW_MODE_HT40) {
+    // HT40 achieves higher speeds (150 Mbps max)
+    if (rssi > -50) {
+      snprintf(output, max_len, "~80-150 Mbps (802.11n HT40) - Excellent");
+    } else if (rssi > -60) {
+      snprintf(output, max_len, "~40-80 Mbps (802.11n HT40) - Good");
+    } else if (rssi > -70) {
+      snprintf(output, max_len, "~20-40 Mbps (802.11n HT40) - Fair");
+    } else {
+      snprintf(output, max_len, "~5-20 Mbps (802.11n HT40) - Weak");
+    }
+  } else if (bwMode == WIFI_BW_MODE_HT20) {
+    // HT20 achieves medium speeds (72 Mbps max)
+    if (rssi > -50) {
+      snprintf(output, max_len, "~36-72 Mbps (802.11n HT20) - Excellent");
+    } else if (rssi > -60) {
+      snprintf(output, max_len, "~18-36 Mbps (802.11n HT20) - Good");
+    } else if (rssi > -70) {
+      snprintf(output, max_len, "~9-18 Mbps (802.11n HT20) - Fair");
+    } else {
+      snprintf(output, max_len, "~2-9 Mbps (802.11n HT20) - Weak");
+    }
   } else {
-    strncpy(output, "1 Mbps (802.11b DBPSK) - Maximum Distance", max_len - 1);
+    // 802.11b mode for maximum range (11 Mbps max)
+    if (rssi > -50) {
+      snprintf(output, max_len, "11 Mbps (802.11b CCK) - Maximum Range");
+    } else if (rssi > -60) {
+      snprintf(output, max_len, "5.5 Mbps (802.11b CCK) - Long Range");
+    } else if (rssi > -70) {
+      snprintf(output, max_len, "2 Mbps (802.11b DQPSK) - Extended Range");
+    } else {
+      snprintf(output, max_len, "1 Mbps (802.11b DBPSK) - Maximum Distance");
+    }
   }
   output[max_len - 1] = '\0';
 }
@@ -1468,27 +1515,28 @@ void WebServerManager::generateWebPage(char *output, size_t max_len) {
       "                </div>\n"
       "\n"
       "                <hr style=\"border-color: rgba(255,255,255,0.15); margin: 20px 0;\">\n"
-      "                <h3 style=\"margin-top: 20px; margin-bottom: 15px;\">WiFi Config</h3>\n"
+      "                <h3 style=\"margin-top: 20px; margin-bottom: 15px; text-align: center;\">WiFi Config</h3>\n"
       "                <div class=\"control-group\">\n"
       "                    <label>New SSID:</label>\n"
-      "                    <input type=\"text\" id=\"wifi-ssid-input\" maxlength=\"63\" placeholder=\"Network name\">\n"
+      "                    <input type=\"text\" id=\"wifi-ssid-input\" class=\"slider\" style=\"background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); width: 100%;\" maxlength=\"63\" placeholder=\"Network name\">\n"
       "                </div>\n"
       "                <div class=\"control-group\">\n"
       "                    <label>Password:</label>\n"
-      "                    <div style=\"display:flex; gap:5px;\">\n"
-      "                        <input type=\"password\" id=\"wifi-pw-input\" maxlength=\"63\" placeholder=\"Password\" style=\"flex:1;\">\n"
-      "                        <button id=\"wifi-toggle-pw\" style=\"width:80px; padding:12px;\">Show</button>\n"
+      "                    <div style=\"display:flex; gap:10px;\">\n"
+      "                        <input type=\"password\" id=\"wifi-pw-input\" class=\"slider\" style=\"background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); flex:1;\" maxlength=\"63\" placeholder=\"Password\">\n"
+      "                        <button id=\"wifi-toggle-pw\" style=\"width:80px; padding:10px; background: rgba(255, 255, 255, 0.2); border: none; color: white; border-radius: 8px; cursor: pointer;\">SHOW</button>\n"
       "                    </div>\n"
       "                </div>\n"
       "                <div class=\"control-group\">\n"
       "                    <label>Bandwidth:</label>\n"
-      "                    <select id=\"wifi-bw-select\">\n"
+      "                    <select id=\"wifi-bw-select\" class=\"slider\" style=\"background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); width: 100%;\">\n"
       "                        <option value=\"0\">📡 Max Range (Slowest) - 802.11b</option>\n"
       "                        <option value=\"1\">⚖️ Balanced Speed - HT20</option>\n"
       "                        <option value=\"2\">⚡ Max Speed (Close Range) - HT40</option>\n"
       "                    </select>\n"
       "                </div>\n"
-      "                <button id=\"wifi-apply-btn\">Apply WiFi Settings</button>\n"
+      "                <button id=\"wifi-apply-btn\" style=\"background: linear-gradient(45deg, #4CAF50, #45a049); border: none; color: white; width: 100%; padding: 12px; border-radius: 8px; font-weight: 600; cursor: pointer; text-transform: uppercase;\">APPLY WIFI SETTINGS</button>\n"
+      "                <div id=\"wifi-result\" style=\"margin-top: 15px; padding: 10px; border-radius: 8px; display: none; text-align: center; font-size: 13px;\"></div>\n",old_string:      "                <button id=\"wifi-apply-btn\">Apply WiFi Settings</button>\n"
       "                <div id=\"wifi-result\" style=\"display:none; margin-top:10px; padding:10px; border-radius:4px; font-size:13px;\"></div>\n"
       "            </div>\n"
       "        </div>\n"
