@@ -61,19 +61,27 @@ void WebServerManager::handleClient(WiFiClient &client) {
   total_requests++;
   last_request_time = millis();
 
-  // Parse HTTP request
-  HttpRequest request;
-  if (!parseHttpRequest(client, request)) {
-    Serial.println("Failed to parse HTTP request");
+  // Allocate request on heap to avoid stack overflow
+  HttpRequest *request = (HttpRequest *)malloc(sizeof(HttpRequest));
+  if (!request) {
+    Serial.println("Failed to allocate memory for HTTP request");
     error_requests++;
     client.stop();
     return;
   }
 
-  logRequest(request);
+  if (!parseHttpRequest(client, *request)) {
+    Serial.println("Failed to parse HTTP request");
+    error_requests++;
+    client.stop();
+    free(request);
+    return;
+  }
+
+  logRequest(*request);
 
   // Process request and generate response
-  ApiResponse response = processRequest(request);
+  ApiResponse response = processRequest(*request);
 
   logResponse(response);
 
@@ -85,6 +93,7 @@ void WebServerManager::handleClient(WiFiClient &client) {
     free(response.binary_data);
   }
 
+  free(request);
   client.stop();
 }
 
@@ -109,7 +118,15 @@ bool WebServerManager::parseHttpRequest(WiFiClient &client,
   memset(request.body, 0, sizeof(request.body));
 
   // Parse headers
+  unsigned long parse_start = millis();
+  const unsigned long parse_timeout = 5000; // 5 second timeout for header parsing
+
   while (client.connected() && !headers_complete) {
+    if ((millis() - parse_start) > parse_timeout) {
+      Serial.println("HTTP header parsing timeout");
+      return false;
+    }
+
     if (client.available()) {
       char c = client.read();
 
@@ -159,6 +176,8 @@ bool WebServerManager::parseHttpRequest(WiFiClient &client,
       } else if (c != '\r' && line_pos < sizeof(current_line) - 1) {
         current_line[line_pos++] = c;
       }
+    } else {
+      delay(1); // Avoid busy-looping when no data available
     }
   }
 
@@ -302,6 +321,8 @@ ApiResponse WebServerManager::processRequest(const HttpRequest &request) {
     return handleStatus();
   } else if (strcmp(request.path, "/snapshot") == 0) {
     return handleSnapshot(request);
+  } else if (strcmp(request.path, "/wifi") == 0) {
+    return handleWiFiConfig(request);
   } else {
     return handle404();
   }
@@ -344,9 +365,26 @@ ApiResponse WebServerManager::handleRoot() {
   strncpy(response.content_type, "text/html",
           sizeof(response.content_type) - 1);
   response.content_type[sizeof(response.content_type) - 1] = '\0';
-  response.is_binary = false;
 
-  generateWebPage(response.body, sizeof(response.body));
+  // Allocate HTML buffer on heap to avoid stack overflow
+  char *html_buffer = (char *)malloc(HTML_BUFFER_SIZE);
+  if (!html_buffer) {
+    strcpy(response.body, "<html><body><h1>500 Error</h1><p>Memory allocation failed</p></body></html>");
+    response.status_code = 500;
+    response.is_binary = false;
+    response.binary_data = nullptr;
+    response.content_length = strlen(response.body);
+    return response;
+  }
+
+  generateWebPage(html_buffer, HTML_BUFFER_SIZE);
+
+  // Use binary_data pointer to avoid copying large buffer
+  response.is_binary = true;
+  response.binary_data = (uint8_t *)html_buffer;
+  response.content_length = strlen(html_buffer);
+  response.body[0] = '\0';  // Clear body since we're using binary_data
+
   return response;
 }
 
@@ -469,6 +507,70 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest &request) {
                         sizeof(response.body));
   }
 
+  return response;
+}
+
+ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
+  ApiResponse response;
+  response.status_code = 200;
+  strncpy(response.content_type, "application/json", sizeof(response.content_type) - 1);
+  response.is_binary = false;
+
+  if (request.type != REQ_POST) {
+    response.status_code = 405;
+    createErrorResponse("Method not allowed", 405, response.body, sizeof(response.body));
+    return response;
+  }
+
+  JsonDocument json;
+  if (!parseJsonBody(request.body, json)) {
+    response.status_code = 400;
+    createErrorResponse("Invalid JSON", 400, response.body, sizeof(response.body));
+    return response;
+  }
+
+  bool ssid_changed = false;
+  bool any_valid = false;
+
+  if (json.containsKey("ssid") && json["ssid"].is<const char*>()) {
+    const char *s = json["ssid"];
+    if (s && strlen(s) > 0 && strlen(s) <= 63) {
+      ssid_changed = strcmp(s, configManager.getWiFiSSID()) != 0;
+      configManager.setWiFiCredentials(s, configManager.getWiFiPassword());
+      any_valid = true;
+    }
+  }
+
+  if (json.containsKey("password") && json["password"].is<const char*>()) {
+    const char *p = json["password"];
+    if (p && strlen(p) <= 63) {
+      configManager.setWiFiCredentials(configManager.getWiFiSSID(), p);
+      any_valid = true;
+    }
+  }
+
+  if (json.containsKey("bandwidth") && json["bandwidth"].is<int>()) {
+    uint8_t bw = json["bandwidth"];
+    if (bw <= WIFI_BW_MODE_HT40) {
+      configManager.setWiFiBandwidthMode(bw);
+      any_valid = true;
+    }
+  }
+
+  if (!any_valid) {
+    response.status_code = 400;
+    createErrorResponse("No valid fields", 400, response.body, sizeof(response.body));
+    return response;
+  }
+
+  configManager.saveConfig();
+  wifi_reconnect_requested = true;
+
+  JsonDocument resp;
+  resp["status"] = "success";
+  resp["message"] = ssid_changed ? "SSID changed, reconnecting..." : "Settings saved, reconnecting...";
+  resp["ssid_changed"] = ssid_changed;
+  serializeJson(resp, response.body, sizeof(response.body));
   return response;
 }
 
@@ -683,7 +785,8 @@ void WebServerManager::generateStatusJson(JsonDocument &doc) {
   wifi["subnet"] = WiFi.subnetMask().toString();
   wifi["dns"] = WiFi.dnsIP().toString();
   wifi["mac"] = WiFi.macAddress();
-  wifi["ssid"] = configManager.getWiFiSSID();
+  // Show the actual connected SSID, not the configured one
+  wifi["ssid"] = WiFi.SSID().c_str();
   wifi["mode"] = configManager.useStaticIP() ? "Static" : "DHCP";
   wifi["rssi"] = WiFi.RSSI();
   wifi["signal_percentage"] = getWiFiSignalPercentage();
@@ -723,14 +826,20 @@ void WebServerManager::getWiFiProtocol(char *output, size_t max_len) {
 }
 
 void WebServerManager::getWiFiBandwidth(char *output, size_t max_len) {
-  if (WiFi.status() != WL_CONNECTED) {
-    strncpy(output, "unknown", max_len - 1);
-    output[max_len - 1] = '\0';
-    return;
+  uint8_t bwMode = configManager.getWiFiBandwidthMode();
+
+  switch (bwMode) {
+    case WIFI_BW_MODE_HT20:
+      strncpy(output, "⚖️ Balanced Speed - HT20 (20MHz)", max_len - 1);
+      break;
+    case WIFI_BW_MODE_HT40:
+      strncpy(output, "⚡ Max Speed - HT40 (40MHz)", max_len - 1);
+      break;
+    default: // WIFI_BW_MODE_11B
+      strncpy(output, "📡 Max Range - 802.11b (22MHz)", max_len - 1);
+      break;
   }
 
-  // We force 802.11b mode which uses 22MHz channels
-  strncpy(output, "22MHz (802.11b DSSS) - Maximum Range", max_len - 1);
   output[max_len - 1] = '\0';
 }
 
@@ -1357,6 +1466,30 @@ void WebServerManager::generateWebPage(char *output, size_t max_len) {
       "                    <span id=\"wifi-status-text\">Checking "
       "connection...</span>\n"
       "                </div>\n"
+      "\n"
+      "                <hr style=\"border-color: rgba(255,255,255,0.15); margin: 20px 0;\">\n"
+      "                <h3 style=\"margin-top: 20px; margin-bottom: 15px;\">WiFi Config</h3>\n"
+      "                <div class=\"control-group\">\n"
+      "                    <label>New SSID:</label>\n"
+      "                    <input type=\"text\" id=\"wifi-ssid-input\" maxlength=\"63\" placeholder=\"Network name\">\n"
+      "                </div>\n"
+      "                <div class=\"control-group\">\n"
+      "                    <label>Password:</label>\n"
+      "                    <div style=\"display:flex; gap:5px;\">\n"
+      "                        <input type=\"password\" id=\"wifi-pw-input\" maxlength=\"63\" placeholder=\"Password\" style=\"flex:1;\">\n"
+      "                        <button id=\"wifi-toggle-pw\" style=\"width:80px; padding:12px;\">Show</button>\n"
+      "                    </div>\n"
+      "                </div>\n"
+      "                <div class=\"control-group\">\n"
+      "                    <label>Bandwidth:</label>\n"
+      "                    <select id=\"wifi-bw-select\">\n"
+      "                        <option value=\"0\">📡 Max Range (Slowest) - 802.11b</option>\n"
+      "                        <option value=\"1\">⚖️ Balanced Speed - HT20</option>\n"
+      "                        <option value=\"2\">⚡ Max Speed (Close Range) - HT40</option>\n"
+      "                    </select>\n"
+      "                </div>\n"
+      "                <button id=\"wifi-apply-btn\">Apply WiFi Settings</button>\n"
+      "                <div id=\"wifi-result\" style=\"display:none; margin-top:10px; padding:10px; border-radius:4px; font-size:13px;\"></div>\n"
       "            </div>\n"
       "        </div>\n"
       "\n"
@@ -1529,7 +1662,6 @@ void WebServerManager::generateWebPage(char *output, size_t max_len) {
       "                this.bindEvents();\n"
       "                this.updatePayloadDisplay();\n"
       "                this.loadWiFiInfo();\n"
-      "                this.loadAPIKey();\n"
       "            }\n"
       "\n"
       "            async loadAPIKey() {\n"
@@ -1689,6 +1821,50 @@ void WebServerManager::generateWebPage(char *output, size_t max_len) {
       "document.getElementById('capture-btn').addEventListener('click', () => "
       "{\n"
       "                    this.takePhoto();\n"
+      "                });\n"
+      "\n"
+      "                // WiFi Config\n"
+      "                document.getElementById('wifi-toggle-pw').addEventListener("
+      "'click', () => {\n"
+      "                    const inp = document.getElementById("
+      "'wifi-pw-input');\n"
+      "                    if (inp.type === 'password') { inp.type = 'text'; }\n"
+      "                    else { inp.type = 'password'; }\n"
+      "                });\n"
+      "\n"
+      "                document.getElementById('wifi-apply-btn').addEventListener("
+      "'click', async () => {\n"
+      "                    const s = document.getElementById("
+      "'wifi-ssid-input').value.trim();\n"
+      "                    const p = document.getElementById("
+      "'wifi-pw-input').value;\n"
+      "                    const b = parseInt(document.getElementById("
+      "'wifi-bw-select').value);\n"
+      "                    const pl = {bandwidth: b};\n"
+      "                    if (s) pl.ssid = s;\n"
+      "                    if (p) pl.password = p;\n"
+      "                    const r = document.getElementById('wifi-result');\n"
+      "                    r.style.display = 'block';\n"
+      "                    r.textContent = 'Applying...';\n"
+      "                    r.style.background = '#2196f3';\n"
+      "                    try {\n"
+      "                        const res = await fetch('/wifi', {method:"
+      " 'POST', headers: {'Content-Type': 'application/json'}, body:"
+      " JSON.stringify(pl)});\n"
+      "                        const d = await res.json();\n"
+      "                        if (d.status === 'success') {\n"
+      "                            r.style.background = '#4caf50';\n"
+      "                            r.textContent = d.message;\n"
+      "                            setTimeout(() => location.reload(), 2000);\n"
+      "                        } else {\n"
+      "                            r.style.background = '#f44336';\n"
+      "                            r.textContent = d.error || 'Error';\n"
+      "                        }\n"
+      "                    } catch (e) {\n"
+      "                        r.style.background = '#FFA500';\n"
+      "                        r.textContent = 'Settings applied! Device reconnecting... Reloading page in 5 seconds...';\n"
+      "                        setTimeout(() => location.reload(), 5000);\n"
+      "                    }\n"
       "                });\n"
       "            }\n"
       "\n"

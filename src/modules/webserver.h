@@ -10,6 +10,7 @@
 
 #define HTTP_BUFFER_SIZE 1024
 #define JSON_BUFFER_SIZE 2048
+#define HTML_BUFFER_SIZE 65536
 #define MAX_PATH_LENGTH 256
 #define MAX_HEADERS_LENGTH 2048
 #define MAX_BODY_LENGTH 4096
@@ -56,6 +57,7 @@ public:
   ApiResponse handleRoot();
   ApiResponse handleStatus();
   ApiResponse handleSnapshot(const HttpRequest &request);
+  ApiResponse handleWiFiConfig(const HttpRequest &request);
   ApiResponse handle404();
 
   // JSON utilities
@@ -106,5 +108,8 @@ private:
 
 // Global web server manager instance
 extern WebServerManager webServerManager;
+
+// WiFi reconnect flag from main.cpp
+extern volatile bool wifi_reconnect_requested;
 
 #endif // WEBSERVER_H

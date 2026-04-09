@@ -9,7 +9,7 @@
 // EEPROM Memory Layout
 #define EEPROM_SIZE 512
 #define CONFIG_MAGIC 0xCAFE
-#define CONFIG_VERSION 1
+#define CONFIG_VERSION 2
 
 // Memory offsets
 #define OFFSET_MAGIC 0
@@ -27,6 +27,14 @@
 #define OFFSET_JPEG_QUALITY 281
 #define OFFSET_DEFAULT_RESOLUTION 282
 #define OFFSET_FLASH_THRESHOLD 283
+#define OFFSET_WIFI_BANDWIDTH  284   // 1 byte: 0=802.11b, 1=HT20, 2=HT40
+
+// Bandwidth mode constants
+#define WIFI_BW_MODE_11B   0   // 802.11b DSSS, 22MHz — max range
+#define WIFI_BW_MODE_HT20  1   // 802.11bgn HT20, 20MHz — balanced
+#define WIFI_BW_MODE_HT40  2   // 802.11bgn HT40, 40MHz — high throughput
+
+#define DEFAULT_WIFI_BANDWIDTH WIFI_BW_MODE_11B
 
 // String field sizes
 #define SSID_MAX_LEN 64
@@ -35,8 +43,8 @@
 #define DEVICE_NAME_MAX_LEN 64
 
 // Default configuration values
-#define DEFAULT_SSID "ESP32CAM_Config"
-#define DEFAULT_PASSWORD "configure123"
+#define DEFAULT_SSID "MNZ"
+#define DEFAULT_PASSWORD "debianhusk1"
 #define DEFAULT_API_KEY "esp32cam-default-key"
 #define DEFAULT_DEVICE_NAME "ESP32-CAM-Server"
 #define DEFAULT_JPEG_QUALITY 10
@@ -62,6 +70,7 @@ struct Configuration {
   uint8_t jpeg_quality;
   framesize_t default_resolution;
   uint8_t flash_threshold;
+  uint8_t wifi_bandwidth;
 };
 
 class ConfigManager {
@@ -99,6 +108,8 @@ public:
   bool setDefaultResolution(framesize_t resolution);
   bool setFlashThreshold(uint8_t threshold);
   bool setUseStaticIP(bool use_static);
+  uint8_t getWiFiBandwidthMode() const { return config.wifi_bandwidth; }
+  bool setWiFiBandwidthMode(uint8_t mode);
 
   // Validation
   bool isValidConfig() const;

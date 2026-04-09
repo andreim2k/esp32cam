@@ -22,6 +22,39 @@ bool ConfigManager::loadConfig() {
   uint16_t magic = readUint16(OFFSET_MAGIC);
   uint16_t version = readUint16(OFFSET_VERSION);
 
+  // Handle v1→v2 migration
+  if (magic == CONFIG_MAGIC && version == 1) {
+    Serial.println("Migrating config from v1 to v2...");
+    readString(OFFSET_WIFI_SSID, config.wifi_ssid, SSID_MAX_LEN);
+    readString(OFFSET_WIFI_PASSWORD, config.wifi_password, PASSWORD_MAX_LEN);
+    readString(OFFSET_API_KEY, config.api_key, API_KEY_MAX_LEN);
+    readString(OFFSET_DEVICE_NAME, config.device_name, DEVICE_NAME_MAX_LEN);
+
+    config.use_static_ip = readUint8(OFFSET_USE_STATIC_IP);
+    config.static_ip = readIPAddress(OFFSET_STATIC_IP);
+    config.gateway = readIPAddress(OFFSET_GATEWAY);
+    config.subnet = readIPAddress(OFFSET_SUBNET);
+    config.dns_primary = readIPAddress(OFFSET_DNS_PRIMARY);
+    config.dns_secondary = readIPAddress(OFFSET_DNS_SECONDARY);
+
+    config.jpeg_quality = readUint8(OFFSET_JPEG_QUALITY);
+    config.default_resolution = (framesize_t)readUint8(OFFSET_DEFAULT_RESOLUTION);
+    config.flash_threshold = readUint8(OFFSET_FLASH_THRESHOLD);
+
+    // New field defaults
+    config.wifi_bandwidth = DEFAULT_WIFI_BANDWIDTH;
+
+    // Update version and save new field to EEPROM
+    writeUint16(OFFSET_MAGIC, CONFIG_MAGIC);
+    writeUint16(OFFSET_VERSION, CONFIG_VERSION);
+    writeUint8(OFFSET_WIFI_BANDWIDTH, config.wifi_bandwidth);
+    EEPROM.commit();
+
+    config_loaded = true;
+    Serial.println("Config migration successful - credentials preserved");
+    return true;
+  }
+
   if (magic != CONFIG_MAGIC || version != CONFIG_VERSION) {
     Serial.printf("Invalid config magic=0x%04X version=%d, using defaults\n",
                   magic, version);
@@ -45,6 +78,7 @@ bool ConfigManager::loadConfig() {
   config.jpeg_quality = readUint8(OFFSET_JPEG_QUALITY);
   config.default_resolution = (framesize_t)readUint8(OFFSET_DEFAULT_RESOLUTION);
   config.flash_threshold = readUint8(OFFSET_FLASH_THRESHOLD);
+  config.wifi_bandwidth = readUint8(OFFSET_WIFI_BANDWIDTH);
 
   if (!validateConfiguration()) {
     Serial.println("Configuration validation failed, using defaults");
@@ -85,6 +119,7 @@ bool ConfigManager::saveConfig() {
   writeUint8(OFFSET_JPEG_QUALITY, config.jpeg_quality);
   writeUint8(OFFSET_DEFAULT_RESOLUTION, (uint8_t)config.default_resolution);
   writeUint8(OFFSET_FLASH_THRESHOLD, config.flash_threshold);
+  writeUint8(OFFSET_WIFI_BANDWIDTH, config.wifi_bandwidth);
 
   if (!EEPROM.commit()) {
     Serial.println("Failed to commit EEPROM changes");
@@ -119,6 +154,7 @@ void ConfigManager::resetToDefaults() {
   config.jpeg_quality = DEFAULT_JPEG_QUALITY;
   config.default_resolution = DEFAULT_RESOLUTION;
   config.flash_threshold = DEFAULT_FLASH_THRESHOLD;
+  config.wifi_bandwidth = DEFAULT_WIFI_BANDWIDTH;
 
   // Null-terminate strings
   config.wifi_ssid[SSID_MAX_LEN - 1] = '\0';
@@ -201,6 +237,12 @@ bool ConfigManager::setFlashThreshold(uint8_t threshold) {
 
 bool ConfigManager::setUseStaticIP(bool use_static) {
   config.use_static_ip = use_static;
+  return true;
+}
+
+bool ConfigManager::setWiFiBandwidthMode(uint8_t mode) {
+  if (mode > WIFI_BW_MODE_HT40) return false;
+  config.wifi_bandwidth = mode;
   return true;
 }
 
@@ -341,6 +383,11 @@ bool ConfigManager::validateConfiguration() const {
         config.subnet == IPAddress(0, 0, 0, 0)) {
       return false;
     }
+  }
+
+  // Validate WiFi bandwidth mode
+  if (config.wifi_bandwidth > WIFI_BW_MODE_HT40) {
+    return false;
   }
 
   return true;

@@ -36,6 +36,9 @@ const unsigned long WIFI_CHECK_INTERVAL = 30000;     // 30 seconds
 const unsigned long MEMORY_CHECK_INTERVAL = 60000;   // 60 seconds
 const unsigned long WATCHDOG_RESET_INTERVAL = 10000; // 10 seconds
 
+// WiFi reconnect request from web UI
+volatile bool wifi_reconnect_requested = false;
+
 /**
  * Helper to convert IPAddress to char array safely
  */
@@ -109,6 +112,29 @@ void checkMemoryUsage() {
 }
 
 /**
+ * Apply WiFi bandwidth mode (802.11b/HT20/HT40)
+ */
+void applyWiFiBandwidthMode() {
+  uint8_t bwMode = configManager.getWiFiBandwidthMode();
+  esp_wifi_set_max_tx_power(78);
+  switch (bwMode) {
+    case WIFI_BW_MODE_HT20:
+      esp_wifi_set_protocol(WIFI_IF_STA,
+          WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+      esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
+      break;
+    case WIFI_BW_MODE_HT40:
+      esp_wifi_set_protocol(WIFI_IF_STA,
+          WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+      esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT40);
+      break;
+    default: // WIFI_BW_MODE_11B
+      esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B);
+      break;
+  }
+}
+
+/**
  * Check WiFi connection and attempt reconnection if needed
  */
 void checkWiFiConnection() {
@@ -120,7 +146,8 @@ void checkWiFiConnection() {
       // Attempt reconnection
       WiFi.disconnect();
       delay(1000);
-      WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
+      WiFi.begin(DEFAULT_SSID, DEFAULT_PASSWORD);
+      applyWiFiBandwidthMode();
 
       // Wait for connection with timeout
       int attempts = 0;
@@ -182,7 +209,7 @@ void emergencyRecovery() {
  */
 void initWiFi() {
   Serial.println("========== WiFi Configuration ==========");
-  Serial.printf("SSID: %s\n", configManager.getWiFiSSID());
+  Serial.printf("SSID: %s\n", DEFAULT_SSID);
 
   // Configure IP settings
   if (configManager.useStaticIP()) {
@@ -215,7 +242,8 @@ void initWiFi() {
   }
 
   Serial.println("Connecting to WiFi...");
-  WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
+  // Always connect to default SSID on boot (can be changed via /wifi endpoint)
+  WiFi.begin(DEFAULT_SSID, DEFAULT_PASSWORD);
   WiFi.setSleep(false);
 
   // MAXIMUM POWER CONFIGURATION FOR LONG DISTANCE
@@ -226,27 +254,10 @@ void initWiFi() {
   WiFi.setAutoReconnect(true); // Enable automatic reconnection
   WiFi.persistent(true); // Store WiFi config in flash for faster reconnects
 
-  // Low-level ESP32 WiFi power optimizations
-  esp_wifi_set_max_tx_power(
-      78); // Set maximum TX power (78 = 19.5dBm, ESP-IDF level)
+  // Apply WiFi bandwidth mode from configuration
+  applyWiFiBandwidthMode();
 
-  // Force 802.11b mode for MAXIMUM RANGE (sacrifice speed for distance)
-  esp_wifi_set_protocol(WIFI_IF_STA,
-                        WIFI_PROTOCOL_11B); // 802.11b only - longest range
-
-  // Additional long-range optimizations
-  wifi_config_t wifi_config;
-  esp_wifi_get_config(WIFI_IF_STA, &wifi_config);
-
-  Serial.println("MAXIMUM DISTANCE MODE ENABLED:");
-  Serial.println("  - Maximum TX Power: 19.5 dBm (78 units)");
-  Serial.println("  - Protocol: 802.11b ONLY (longest range)");
-  Serial.println("  - Data Rate: 1-11 Mbps (maximum reliability)");
-  Serial.println("  - Modulation: DSSS (most robust)");
-  Serial.println("  - Auto-reconnect: ENABLED");
-  Serial.println("  - Persistent config: ENABLED");
-  Serial.println("  - Sleep mode: DISABLED");
-  Serial.println("  - Priority: MAXIMUM DISTANCE > SPEED");
+  Serial.println("WiFi bandwidth mode applied from configuration");
 
   // Non-blocking connection with watchdog resets
   int attempts = 0;
@@ -299,7 +310,7 @@ void initWiFi() {
   } else {
     Serial.println();
     Serial.println("ERROR: WiFi connection failed!");
-    Serial.println("Check your WiFi credentials and network settings.");
+    Serial.println("Check your WiFi network (MNZ) and password.");
     Serial.printf("Final WiFi status: %d\n", WiFi.status());
     Serial.println("Device will continue but network features won't work.");
   }
@@ -403,6 +414,16 @@ void loop() {
   if (free_heap < 20000) { // Less than 20KB free
     Serial.println("CRITICAL: Very low memory, triggering emergency recovery");
     emergencyRecovery();
+  }
+
+  // Handle deferred WiFi reconnect from /wifi endpoint
+  if (wifi_reconnect_requested) {
+    wifi_reconnect_requested = false;
+    Serial.println("WiFi reconnect requested by web UI...");
+    WiFi.disconnect();
+    delay(500);
+    applyWiFiBandwidthMode();
+    WiFi.begin(DEFAULT_SSID, DEFAULT_PASSWORD);
   }
 
   // Handle incoming HTTP requests using the web server manager
