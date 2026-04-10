@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <WiFi.h>
+#include "credentials.h"
 
 // EEPROM Memory Layout
 #define EEPROM_SIZE 512
@@ -43,8 +44,7 @@
 #define DEVICE_NAME_MAX_LEN 64
 
 // Default configuration values
-#define DEFAULT_SSID "MNZ"
-#define DEFAULT_PASSWORD "debianhusk1"
+// DEFAULT_SSID and DEFAULT_PASSWORD are defined in credentials.h
 #define DEFAULT_API_KEY "esp32cam-default-key"
 #define DEFAULT_DEVICE_NAME "ESP32-CAM-Server"
 #define DEFAULT_JPEG_QUALITY 10

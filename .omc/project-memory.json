@@ -1,0 +1,161 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1775739247709,
+  "projectRoot": "/Users/andrei/Development/esp32cam",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": "npm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "src"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 1,
+      "lastAccessed": 1775739247705,
+      "keyFiles": [
+        "main.cpp"
+      ]
+    },
+    "web": {
+      "path": "web",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1775739247705,
+      "keyFiles": [
+        "index.html"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "src/modules/webserver.cpp",
+      "accessCount": 112,
+      "lastAccessed": 1775803540085,
+      "type": "file"
+    },
+    {
+      "path": "src/main.cpp",
+      "accessCount": 33,
+      "lastAccessed": 1775803546062,
+      "type": "file"
+    },
+    {
+      "path": "src/modules/config.h",
+      "accessCount": 16,
+      "lastAccessed": 1775803547990,
+      "type": "file"
+    },
+    {
+      "path": "src/modules/webserver.h",
+      "accessCount": 15,
+      "lastAccessed": 1775801588759,
+      "type": "file"
+    },
+    {
+      "path": "src/modules/config.cpp",
+      "accessCount": 14,
+      "lastAccessed": 1775802476571,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 7,
+      "lastAccessed": 1775801589338,
+      "type": "directory"
+    },
+    {
+      "path": "web/index.html",
+      "accessCount": 5,
+      "lastAccessed": 1775802470615,
+      "type": "file"
+    },
+    {
+      "path": "src",
+      "accessCount": 4,
+      "lastAccessed": 1775802469388,
+      "type": "directory"
+    },
+    {
+      "path": "src/modules/camera.cpp",
+      "accessCount": 3,
+      "lastAccessed": 1775801529435,
+      "type": "file"
+    },
+    {
+      "path": "WiFi_Enhancement_Summary.md",
+      "accessCount": 2,
+      "lastAccessed": 1775739414271,
+      "type": "file"
+    },
+    {
+      "path": "platformio.ini",
+      "accessCount": 2,
+      "lastAccessed": 1775765576990,
+      "type": "file"
+    },
+    {
+      "path": "src/modules/camera.h",
+      "accessCount": 2,
+      "lastAccessed": 1775801533105,
+      "type": "file"
+    },
+    {
+      "path": "src/modules/flash.cpp",
+      "accessCount": 2,
+      "lastAccessed": 1775801533366,
+      "type": "file"
+    },
+    {
+      "path": "src/modules/flash.h",
+      "accessCount": 2,
+      "lastAccessed": 1775801533567,
+      "type": "file"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 1,
+      "lastAccessed": 1775739392712,
+      "type": "file"
+    },
+    {
+      "path": "src/modules/credentials.h",
+      "accessCount": 1,
+      "lastAccessed": 1775803548924,
+      "type": "file"
+    },
+    {
+      "path": "src/modules/credentials.h.example",
+      "accessCount": 1,
+      "lastAccessed": 1775803549446,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

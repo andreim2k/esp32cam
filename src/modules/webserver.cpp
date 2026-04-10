@@ -567,7 +567,11 @@ ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
     return response;
   }
 
-  configManager.saveConfig();
+  if (!configManager.saveConfig()) {
+    response.status_code = 500;
+    createErrorResponse("Failed to save settings to EEPROM", 500, response.body, sizeof(response.body));
+    return response;
+  }
   wifi_reconnect_requested = true;
 
   JsonDocument resp;
@@ -1370,47 +1374,6 @@ void WebServerManager::generateWebPage(char *output, size_t max_len) {
       "            100% { transform: rotate(360deg); }\n"
       "        }\n"
       "\n"
-      "        .wifi-info-grid {\n"
-      "            display: grid;\n"
-      "            grid-template-columns: repeat(auto-fit, minmax(250px, "
-      "1fr));\n"
-      "            gap: 15px;\n"
-      "            margin-bottom: 20px;\n"
-      "        }\n"
-      "\n"
-      "        .info-item {\n"
-      "            background: rgba(255, 255, 255, 0.05);\n"
-      "            padding: 12px;\n"
-      "            border-radius: 8px;\n"
-      "            border: 1px solid rgba(255, 255, 255, 0.1);\n"
-      "        }\n"
-      "\n"
-      "        .info-item label {\n"
-      "            display: block;\n"
-      "            font-size: 12px;\n"
-      "            color: rgba(255, 255, 255, 0.7);\n"
-      "            margin-bottom: 5px;\n"
-      "            text-transform: uppercase;\n"
-      "            letter-spacing: 0.5px;\n"
-      "        }\n"
-      "\n"
-      "        .info-value {\n"
-      "            font-size: 14px;\n"
-      "            font-weight: 600;\n"
-      "            color: #fff;\n"
-      "            font-family: 'Courier New', monospace;\n"
-      "        }\n"
-      "\n"
-      "        .wifi-status {\n"
-      "            display: flex;\n"
-      "            align-items: center;\n"
-      "            justify-content: center;\n"
-      "            padding: 15px;\n"
-      "            background: rgba(255, 255, 255, 0.05);\n"
-      "            border-radius: 8px;\n"
-      "            border: 1px solid rgba(255, 255, 255, 0.1);\n"
-      "        }\n"
-      "\n"
       "        @media (max-width: 768px) {\n"
       "            .wifi-info-grid {\n"
       "                grid-template-columns: 1fr;\n"
@@ -1542,7 +1505,20 @@ void WebServerManager::generateWebPage(char *output, size_t max_len) {
       "\n"
       "        <div class=\"controls-section\">\n"
       "            <div class=\"control-panel\">\n"
-      "                <h2>Camera Controls</h2>\n",old_string:
+      "                <h2>Camera Controls</h2>\n"
+      "                \n"
+      "                <div class=\"control-group\">\n"
+      "                    <label for=\"resolution-select\">Resolution:</label>\n"
+      "                    <select id=\"resolution-select\">\n"
+      "                        <option value=\"UXGA\">UXGA (1600x1200)</option>\n"
+      "                        <option value=\"SXGA\">SXGA (1280x1024)</option>\n"
+      "                        <option value=\"XGA\">XGA (1024x768)</option>\n"
+      "                        <option value=\"SVGA\">SVGA (800x600)</option>\n"
+      "                        <option value=\"VGA\">VGA (640x480)</option>\n"
+      "                        <option value=\"CIF\">CIF (400x296)</option>\n"
+      "                        <option value=\"QVGA\">QVGA (320x240)</option>\n"
+      "                    </select>\n"
+      "                </div>\n"
       "\n"
       "                <div class=\"control-group\">\n"
       "                    <label>Brightness:</label>\n"

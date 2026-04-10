@@ -30,3 +30,6 @@ Thumbs.db
 *.bin
 *.elf
 *.map
+
+# Credentials (security)
+src/modules/credentials.h

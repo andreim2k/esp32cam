@@ -146,7 +146,7 @@ void checkWiFiConnection() {
       // Attempt reconnection
       WiFi.disconnect();
       delay(1000);
-      WiFi.begin(DEFAULT_SSID, DEFAULT_PASSWORD);
+      WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
       applyWiFiBandwidthMode();
 
       // Wait for connection with timeout
@@ -209,7 +209,7 @@ void emergencyRecovery() {
  */
 void initWiFi() {
   Serial.println("========== WiFi Configuration ==========");
-  Serial.printf("SSID: %s\n", DEFAULT_SSID);
+  Serial.printf("SSID: %s\n", configManager.getWiFiSSID());
 
   // Configure IP settings
   if (configManager.useStaticIP()) {
@@ -242,8 +242,8 @@ void initWiFi() {
   }
 
   Serial.println("Connecting to WiFi...");
-  // Always connect to default SSID on boot (can be changed via /wifi endpoint)
-  WiFi.begin(DEFAULT_SSID, DEFAULT_PASSWORD);
+  // Connect using saved SSID/password from EEPROM
+  WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
   WiFi.setSleep(false);
 
   // MAXIMUM POWER CONFIGURATION FOR LONG DISTANCE
@@ -310,7 +310,7 @@ void initWiFi() {
   } else {
     Serial.println();
     Serial.println("ERROR: WiFi connection failed!");
-    Serial.println("Check your WiFi network (MNZ) and password.");
+    Serial.printf("Check your WiFi network (%s) and password.\n", configManager.getWiFiSSID());
     Serial.printf("Final WiFi status: %d\n", WiFi.status());
     Serial.println("Device will continue but network features won't work.");
   }
@@ -423,8 +423,8 @@ void loop() {
     Serial.printf("Using saved credentials - SSID: %s\n", configManager.getWiFiSSID());
     WiFi.disconnect();
     delay(500);
-    applyWiFiBandwidthMode();
     WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
+    applyWiFiBandwidthMode();
   }
 
   // Handle incoming HTTP requests using the web server manager
