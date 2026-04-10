@@ -145,7 +145,7 @@ void ConfigManager::resetToDefaults() {
 
   // Default to Static IP 192.168.50.3
   config.use_static_ip = true;
-  config.static_ip = IPAddress(192, 168, 50, 3);
+  config.static_ip = IPAddress(192, 168, 50, 4);
   config.gateway = IPAddress(192, 168, 50, 1);
   config.subnet = IPAddress(255, 255, 255, 0);
   config.dns_primary = IPAddress(192, 168, 50, 1);
