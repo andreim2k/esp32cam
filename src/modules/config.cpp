@@ -22,9 +22,10 @@ bool ConfigManager::loadConfig() {
   uint16_t magic = readUint16(OFFSET_MAGIC);
   uint16_t version = readUint16(OFFSET_VERSION);
 
-  // Handle v1→v2 migration
-  if (magic == CONFIG_MAGIC && version == 1) {
-    Serial.println("Migrating config from v1 to v2...");
+  // Migrate any older config layout that still shares the same core fields.
+  if (magic == CONFIG_MAGIC && version > 0 && version < CONFIG_VERSION) {
+    Serial.printf("Migrating config from v%d to v%d...\n", version,
+                  CONFIG_VERSION);
     readString(OFFSET_WIFI_SSID, config.wifi_ssid, SSID_MAX_LEN);
     readString(OFFSET_WIFI_PASSWORD, config.wifi_password, PASSWORD_MAX_LEN);
     readString(OFFSET_API_KEY, config.api_key, API_KEY_MAX_LEN);
@@ -41,16 +42,24 @@ bool ConfigManager::loadConfig() {
     config.default_resolution = (framesize_t)readUint8(OFFSET_DEFAULT_RESOLUTION);
     config.flash_threshold = readUint8(OFFSET_FLASH_THRESHOLD);
 
-    // New field defaults
-    config.wifi_bandwidth = DEFAULT_WIFI_BANDWIDTH;
+    // Older versions did not persist WiFi bandwidth.
+    if (version >= 5) {
+      config.wifi_bandwidth = readUint8(OFFSET_WIFI_BANDWIDTH);
+    } else {
+      config.wifi_bandwidth = DEFAULT_WIFI_BANDWIDTH;
+    }
 
-    // Update version and save new field to EEPROM
-    writeUint16(OFFSET_MAGIC, CONFIG_MAGIC);
-    writeUint16(OFFSET_VERSION, CONFIG_VERSION);
-    writeUint8(OFFSET_WIFI_BANDWIDTH, config.wifi_bandwidth);
-    EEPROM.commit();
+    if (!validateConfiguration()) {
+      Serial.println("Migrated configuration validation failed, using defaults");
+      resetToDefaults();
+      return saveConfig();
+    }
 
     config_loaded = true;
+    if (!saveConfig()) {
+      Serial.println("Failed to persist migrated configuration");
+      return false;
+    }
     Serial.println("Config migration successful - credentials preserved");
     return true;
   }
@@ -143,8 +152,8 @@ void ConfigManager::resetToDefaults() {
 
   strncpy(config.device_name, DEFAULT_DEVICE_NAME, DEVICE_NAME_MAX_LEN - 1);
 
-  // Default to Static IP 192.168.50.3
-  config.use_static_ip = true;
+  // Default to DHCP
+  config.use_static_ip = false;
   config.static_ip = IPAddress(192, 168, 50, 3);
   config.gateway = IPAddress(192, 168, 50, 1);
   config.subnet = IPAddress(255, 255, 255, 0);
