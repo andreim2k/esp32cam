@@ -32,6 +32,7 @@ enum CaptureResult {
 
 struct CameraSettings {
   framesize_t resolution;
+  uint8_t jpeg_quality; // 0-63 (lower is better)
   int8_t brightness;    // -2 to +2
   int8_t contrast;      // -2 to +2
   int8_t saturation;    // -2 to +2
@@ -53,6 +54,7 @@ public:
   
   // Resolution management
   framesize_t getFrameSize(const String& size_param);
+  framesize_t getSafeFrameSize(framesize_t resolution);
   void getResolutionString(framesize_t resolution, char* output, size_t max_len);
   bool setResolution(framesize_t resolution);
   framesize_t getCurrentResolution();
@@ -72,6 +74,7 @@ public:
   bool setBrightness(int8_t brightness);
   bool setContrast(int8_t contrast);
   bool setSaturation(int8_t saturation);
+  bool setJPEGQuality(uint8_t quality);
   bool setExposure(uint16_t exposure);
   bool setGain(uint8_t gain);
   bool setSpecialEffect(uint8_t effect);

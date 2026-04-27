@@ -29,12 +29,14 @@ struct HttpRequest {
 };
 
 struct ApiResponse {
-  int status_code;
-  char content_type[64];
-  char body[JSON_BUFFER_SIZE];
-  size_t content_length;
-  uint8_t *binary_data;
-  bool is_binary;
+  int status_code = 200;
+  char content_type[64] = {0};
+  char body[JSON_BUFFER_SIZE] = {0};
+  size_t content_length = 0;
+  uint8_t *binary_data = nullptr;
+  camera_fb_t *frame_buffer = nullptr;
+  bool is_binary = false;
+  bool owns_binary_data = false;
 };
 
 class WebServerManager {

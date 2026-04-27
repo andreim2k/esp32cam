@@ -88,8 +88,9 @@ void WebServerManager::handleClient(WiFiClient &client) {
   // Send response
   sendResponse(client, response);
 
-  // Clean up binary data if allocated
-  if (response.is_binary && response.binary_data) {
+  if (response.frame_buffer) {
+    cameraManager.releaseFrameBuffer(response.frame_buffer);
+  } else if (response.owns_binary_data && response.binary_data) {
     free(response.binary_data);
   }
 
@@ -338,6 +339,7 @@ ApiResponse WebServerManager::handleRoot() {
   // Use binary_data pointer to avoid copying large buffer
   response.is_binary = true;
   response.binary_data = (uint8_t *)html_buffer;
+  response.owns_binary_data = true;
   response.content_length = strlen(html_buffer);
   response.body[0] = '\0';  // Clear body since we're using binary_data
 
@@ -437,22 +439,8 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest &request) {
   if (fb) {
     response.status_code = 200;
     response.content_length = fb->len;
-    response.binary_data = (uint8_t *)malloc(fb->len);
-    if (response.binary_data) {
-      memcpy(response.binary_data, fb->buf, fb->len);
-      cameraManager.releaseFrameBuffer(fb);
-    } else {
-      cameraManager.releaseFrameBuffer(fb);
-      if (response.binary_data)
-        free(response.binary_data); // Explicit free if somehow set
-      response.status_code = 500;
-      response.is_binary = false;
-      strncpy(response.content_type, "application/json",
-              sizeof(response.content_type) - 1);
-      response.content_type[sizeof(response.content_type) - 1] = '\0';
-      createErrorResponse("Out of memory", 500, response.body,
-                          sizeof(response.body));
-    }
+    response.binary_data = fb->buf;
+    response.frame_buffer = fb;
   } else {
     response.status_code = 500;
     response.is_binary = false;
@@ -601,7 +589,11 @@ bool WebServerManager::parseRequestSettings(const JsonDocument &json,
                                             CameraSettings &settings,
                                             bool &use_flash) {
   // Set defaults
-  settings.resolution = FRAMESIZE_UXGA;
+  settings.resolution = cameraManager.isReady()
+                            ? cameraManager.getCurrentResolution()
+                            : configManager.getDefaultResolution();
+  settings.resolution = cameraManager.getSafeFrameSize(settings.resolution);
+  settings.jpeg_quality = configManager.getJPEGQuality();
   settings.brightness = 0;
   settings.contrast = 0;
   settings.saturation = 0;
@@ -616,10 +608,13 @@ bool WebServerManager::parseRequestSettings(const JsonDocument &json,
   // Parse resolution
   if (json["resolution"].is<const char *>()) {
     const char *res = json["resolution"].as<const char *>();
-    settings.resolution = cameraManager.getFrameSize(String(res));
+    settings.resolution =
+        cameraManager.getSafeFrameSize(cameraManager.getFrameSize(String(res)));
   }
 
   // Parse numeric settings
+  if (json["quality"].is<int>())
+    settings.jpeg_quality = constrain(json["quality"].as<int>(), 0, 63);
   if (json["brightness"].is<int>())
     settings.brightness = constrain(json["brightness"], -2, 2);
   if (json["contrast"].is<int>())

@@ -15,6 +15,7 @@ CameraManager::CameraManager() :
   
   // Initialize default settings
   default_settings.resolution = FRAMESIZE_UXGA;
+  default_settings.jpeg_quality = 10;
   default_settings.brightness = 0;
   default_settings.contrast = 0;
   default_settings.saturation = 0;
@@ -28,6 +29,9 @@ CameraManager::CameraManager() :
 
 bool CameraManager::begin(uint8_t jpeg_quality, framesize_t default_resolution) {
   Serial.println("Initializing camera...");
+  framesize_t safe_resolution = getSafeFrameSize(default_resolution);
+  default_settings.resolution = safe_resolution;
+  default_settings.jpeg_quality = constrain(jpeg_quality, 0, 63);
   
   // Retry camera initialization up to 3 times
   const int max_retries = 3;
@@ -37,10 +41,10 @@ bool CameraManager::begin(uint8_t jpeg_quality, framesize_t default_resolution) 
       delay(1000); // Wait before retry
     }
     
-    if (configureCamera(jpeg_quality, default_resolution)) {
+    if (configureCamera(jpeg_quality, safe_resolution)) {
       if (initializeCameraSensor()) {
-        current_resolution = default_resolution;
-        original_resolution = default_resolution;
+        current_resolution = safe_resolution;
+        original_resolution = safe_resolution;
         camera_ready = true;
         
         Serial.println("Camera initialization complete");
@@ -60,6 +64,7 @@ bool CameraManager::begin(uint8_t jpeg_quality, framesize_t default_resolution) 
 }
 
 bool CameraManager::configureCamera(uint8_t jpeg_quality, framesize_t resolution) {
+  framesize_t safe_resolution = getSafeFrameSize(resolution);
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -80,7 +85,7 @@ bool CameraManager::configureCamera(uint8_t jpeg_quality, framesize_t resolution
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.frame_size = resolution;
+  config.frame_size = safe_resolution;
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_LATEST;
   config.fb_location = CAMERA_FB_IN_PSRAM;
@@ -95,7 +100,7 @@ bool CameraManager::configureCamera(uint8_t jpeg_quality, framesize_t resolution
       config.grab_mode = CAMERA_GRAB_LATEST;
     } else {
       // Limit the frame size when PSRAM is not available
-      config.frame_size = resolution; // Use the requested resolution
+      config.frame_size = safe_resolution;
       config.fb_location = CAMERA_FB_IN_DRAM;
       config.fb_count = 1; // Use only 1 buffer to save internal RAM
       config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
@@ -116,6 +121,18 @@ bool CameraManager::configureCamera(uint8_t jpeg_quality, framesize_t resolution
   }
 
   return true;
+}
+
+framesize_t CameraManager::getSafeFrameSize(framesize_t resolution) {
+  if (!psramFound() && resolution > FRAMESIZE_VGA) {
+    char requested[32];
+    getResolutionString(resolution, requested, sizeof(requested));
+    Serial.printf("Requested resolution %s requires PSRAM; using VGA instead\n",
+                  requested);
+    return FRAMESIZE_VGA;
+  }
+
+  return resolution;
 }
 
 bool CameraManager::initializeCameraSensor() {
@@ -196,18 +213,19 @@ void CameraManager::getResolutionString(framesize_t resolution, char* output, si
 
 bool CameraManager::setResolution(framesize_t resolution) {
   if (!camera_ready) return false;
+  framesize_t safe_resolution = getSafeFrameSize(resolution);
   
   sensor_t* s = getSensor();
   if (!s) return false;
   
-  if (s->set_framesize(s, resolution) != 0) {
-    Serial.printf("Failed to set resolution to %d\n", resolution);
+  if (s->set_framesize(s, safe_resolution) != 0) {
+    Serial.printf("Failed to set resolution to %d\n", safe_resolution);
     return false;
   }
   
-  current_resolution = resolution;
+  current_resolution = safe_resolution;
   char resolution_str[32];
-  getResolutionString(resolution, resolution_str, sizeof(resolution_str));
+  getResolutionString(safe_resolution, resolution_str, sizeof(resolution_str));
   Serial.printf("Resolution changed to: %s\n", resolution_str);
   return true;
 }
@@ -313,7 +331,15 @@ void CameraManager::releaseFrameBuffer(camera_fb_t* fb) {
 
 // Camera settings
 bool CameraManager::applySettings(const CameraSettings& settings) {
-  if (!camera_ready || !validateSettings(settings)) {
+  if (!camera_ready) {
+    return false;
+  }
+
+  CameraSettings safe_settings = settings;
+  safe_settings.resolution = getSafeFrameSize(settings.resolution);
+  safe_settings.jpeg_quality = constrain(settings.jpeg_quality, 0, 63);
+
+  if (!validateSettings(safe_settings)) {
     return false;
   }
   
@@ -321,51 +347,53 @@ bool CameraManager::applySettings(const CameraSettings& settings) {
   if (!s) return false;
   
   char resolution_str[32];
-  getResolutionString(settings.resolution, resolution_str, sizeof(resolution_str));
-  
-  // Store original resolution to restore later if needed
-  framesize_t original_res = current_resolution;
+  getResolutionString(safe_settings.resolution, resolution_str, sizeof(resolution_str));
   
   // Apply resolution first
-  if (settings.resolution != current_resolution) {
-    if (!setResolution(settings.resolution)) {
+  if (safe_settings.resolution != current_resolution) {
+    if (!setResolution(safe_settings.resolution)) {
       return false;
     }
   }
   
+  if (s->set_quality(s, safe_settings.jpeg_quality) != 0) {
+    Serial.printf("Failed to set JPEG quality to %d\n", safe_settings.jpeg_quality);
+    return false;
+  }
+
   // Apply basic image settings
-  s->set_brightness(s, constrain(settings.brightness, -2, 2));
-  s->set_contrast(s, constrain(settings.contrast, -2, 2));
-  s->set_saturation(s, constrain(settings.saturation, -2, 2));
-  s->set_special_effect(s, constrain(settings.special_effect, 0, 6));
+  s->set_brightness(s, constrain(safe_settings.brightness, -2, 2));
+  s->set_contrast(s, constrain(safe_settings.contrast, -2, 2));
+  s->set_saturation(s, constrain(safe_settings.saturation, -2, 2));
+  s->set_special_effect(s, constrain(safe_settings.special_effect, 0, 6));
   
   // Apply white balance settings
-  if (settings.wb_mode == 0) {
+  if (safe_settings.wb_mode == 0) {
     s->set_whitebal(s, 1); // Enable auto white balance
     s->set_awb_gain(s, 1);
     s->set_wb_mode(s, 0);
   } else {
     s->set_whitebal(s, 0); // Disable auto white balance
-    s->set_wb_mode(s, constrain(settings.wb_mode, 0, 4));
+    s->set_wb_mode(s, constrain(safe_settings.wb_mode, 0, 4));
   }
   
   // Apply gain control
-  if (settings.gain > 0) {
+  if (safe_settings.gain > 0) {
     s->set_gain_ctrl(s, 0); // Disable auto gain
-    s->set_agc_gain(s, constrain(settings.gain, 0, 30)); // Set manual gain
+    s->set_agc_gain(s, constrain(safe_settings.gain, 0, 30)); // Set manual gain
   } else {
     s->set_gain_ctrl(s, 1); // Enable auto gain
   }
   
   // Apply orientation settings
-  s->set_hmirror(s, settings.hmirror ? 1 : 0);
-  s->set_vflip(s, settings.vflip ? 1 : 0);
+  s->set_hmirror(s, safe_settings.hmirror ? 1 : 0);
+  s->set_vflip(s, safe_settings.vflip ? 1 : 0);
   
   // Use auto exposure for high resolutions to prevent corruption
-  if (settings.resolution <= FRAMESIZE_VGA && settings.exposure > 0) {
+  if (safe_settings.resolution <= FRAMESIZE_VGA && safe_settings.exposure > 0) {
     // Only use manual exposure for smaller resolutions
     s->set_exposure_ctrl(s, 0); // 0 = disable auto exposure
-    s->set_aec_value(s, constrain(settings.exposure, 0, 1200)); // Set manual exposure value
+    s->set_aec_value(s, constrain(safe_settings.exposure, 0, 1200)); // Set manual exposure value
     s->set_aec2(s, 0); // Disable AEC2
     Serial.println("Manual exposure enabled (small resolution)");
   } else {
@@ -375,9 +403,10 @@ bool CameraManager::applySettings(const CameraSettings& settings) {
     Serial.println("Auto exposure enabled (high resolution protection)");
   }
   
-  Serial.printf("Applied camera settings - Res: %s, Brightness: %d, Contrast: %d, Gain: %d\n", 
+  Serial.printf("Applied camera settings - Res: %s, Quality: %d, Brightness: %d, Contrast: %d, Gain: %d\n",
                resolution_str, 
-               settings.brightness, settings.contrast, settings.gain);
+               safe_settings.jpeg_quality, safe_settings.brightness,
+               safe_settings.contrast, safe_settings.gain);
   
   return true;
 }
@@ -416,6 +445,12 @@ bool CameraManager::setSaturation(int8_t saturation) {
   if (!camera_ready) return false;
   sensor_t* s = getSensor();
   return s && s->set_saturation(s, constrain(saturation, -2, 2)) == 0;
+}
+
+bool CameraManager::setJPEGQuality(uint8_t quality) {
+  if (!camera_ready || quality > 63) return false;
+  sensor_t* s = getSensor();
+  return s && s->set_quality(s, quality) == 0;
 }
 
 bool CameraManager::setExposure(uint16_t exposure) {
@@ -530,6 +565,7 @@ bool CameraManager::validateSettings(const CameraSettings& settings) {
   if (settings.contrast < -2 || settings.contrast > 2) return false;
   if (settings.saturation < -2 || settings.saturation > 2) return false;
   if (settings.exposure > 1200) return false;
+  if (settings.jpeg_quality > 63) return false;
   if (settings.gain > 30) return false;
   if (settings.special_effect > 6) return false;
   if (settings.wb_mode > 4) return false;
