@@ -29,6 +29,9 @@
 // CRASH PREVENTION & MONITORING
 // ===================
 
+// Forward declarations
+void initOTA();
+
 // Global variables for monitoring
 unsigned long last_wifi_check = 0;
 unsigned long last_memory_check = 0;
@@ -216,7 +219,8 @@ void checkWiFiConnection() {
         webServerManager.stop();
         delay(100);
         webServerManager.begin();
-        Serial.println("HTTP server restarted after WiFi reconnect");
+        initOTA();
+        Serial.println("HTTP server and OTA restarted after WiFi reconnect");
       } else {
         Serial.println();
         Serial.println("WiFi reconnection failed");
@@ -528,10 +532,21 @@ void loop() {
     delay(500);
     applyWiFiBandwidthMode();
     WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
+
+    // Wait for WiFi connection before restarting server
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+      delay(500);
+      attempts++;
+    }
+
     webServerManager.stop();
     delay(100);
     webServerManager.begin();
-    Serial.println("HTTP server restarted after WiFi reconnect");
+    if (WiFi.status() == WL_CONNECTED) {
+      initOTA();
+    }
+    Serial.println("HTTP server and OTA restarted after WiFi reconnect");
   }
 
   // Handle OTA update requests

@@ -61,7 +61,6 @@ public:
   
   // Camera capture
   camera_fb_t* captureFrame();
-  camera_fb_t* captureWithFlash(bool use_flash);
   CaptureResult captureToBuffer(uint8_t** buffer, size_t* buffer_size, bool use_flash = false);
   void releaseFrameBuffer(camera_fb_t* fb);
   

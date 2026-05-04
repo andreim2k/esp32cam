@@ -228,10 +228,14 @@ ApiResponse WebServerManager::processRequest(const HttpRequest &request) {
 void WebServerManager::sendResponse(WiFiClient &client,
                                     const ApiResponse &response) {
   // Send status line
-  client.printf("HTTP/1.1 %d %s\r\n", response.status_code,
-                response.status_code == 200   ? "OK"
-                : response.status_code == 404 ? "Not Found"
-                                              : "Error");
+  const char *reason = "Error";
+  if (response.status_code == 200) reason = "OK";
+  else if (response.status_code == 400) reason = "Bad Request";
+  else if (response.status_code == 404) reason = "Not Found";
+  else if (response.status_code == 405) reason = "Method Not Allowed";
+  else if (response.status_code == 500) reason = "Internal Server Error";
+
+  client.printf("HTTP/1.1 %d %s\r\n", response.status_code, reason);
 
   // Send headers
   client.printf("Content-Type: %s\r\n", response.content_type);
@@ -247,18 +251,14 @@ void WebServerManager::sendResponse(WiFiClient &client,
   client.println("Connection: close");
   client.println();
 
-  // Send body
+  // Send body (chunked for all binary data to keep watchdog alive)
   if (response.is_binary && response.binary_data) {
-    if (!response.owns_binary_data) {
-      size_t sent = 0;
-      while (sent < response.content_length) {
-        size_t to_send = (HTML_CHUNK_SIZE < response.content_length - sent) ? HTML_CHUNK_SIZE : (response.content_length - sent);
-        client.write(response.binary_data + sent, to_send);
-        sent += to_send;
-        esp_task_wdt_reset();
-      }
-    } else {
-      client.write(response.binary_data, response.content_length);
+    size_t sent = 0;
+    while (sent < response.content_length) {
+      size_t to_send = (HTML_CHUNK_SIZE < response.content_length - sent) ? HTML_CHUNK_SIZE : (response.content_length - sent);
+      client.write(response.binary_data + sent, to_send);
+      sent += to_send;
+      esp_task_wdt_reset();
     }
   } else {
     client.print(response.body);
@@ -392,7 +392,7 @@ setInterval(refreshStatus,15000);
   response.is_binary = true;
   response.binary_data = (uint8_t *)html_content;
   response.owns_binary_data = false;
-  response.content_length = strlen(html_content);
+  response.content_length = sizeof(html_content) - 1;
 
   return response;
 }
@@ -459,8 +459,9 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest &request) {
     return response;
   }
 
-  // Apply settings
+  // Store original resolution to restore after capture
   framesize_t original_resolution = cameraManager.getCurrentResolution();
+
   if (!cameraManager.applySettings(settings)) {
     response.status_code = 500;
     response.is_binary = false;
@@ -508,6 +509,11 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest &request) {
                         sizeof(response.body));
   }
 
+  // Restore original resolution if it was changed
+  if (original_resolution != cameraManager.getCurrentResolution()) {
+    cameraManager.setResolution(original_resolution);
+  }
+
   return response;
 }
 
@@ -535,7 +541,7 @@ ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
   bool bandwidth_changed = false;
   bool any_valid = false;
 
-  if (json.containsKey("ssid") && json["ssid"].is<const char*>()) {
+  if (json["ssid"].is<const char*>()) {
     const char *s = json["ssid"];
     if (s && strlen(s) > 0 && strlen(s) <= 63) {
       ssid_changed = strcmp(s, configManager.getWiFiSSID()) != 0;
@@ -544,7 +550,7 @@ ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
     }
   }
 
-  if (json.containsKey("password") && json["password"].is<const char*>()) {
+  if (json["password"].is<const char*>()) {
     const char *p = json["password"];
     if (p && strlen(p) <= 63) {
       password_changed = strcmp(p, configManager.getWiFiPassword()) != 0;
@@ -553,7 +559,7 @@ ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
     }
   }
 
-  if (json.containsKey("bandwidth") && json["bandwidth"].is<int>()) {
+  if (json["bandwidth"].is<int>()) {
     uint8_t bw = json["bandwidth"];
     if (bw <= WIFI_BW_MODE_HT40) {
       bandwidth_changed = (bw != configManager.getWiFiBandwidthMode());

@@ -63,11 +63,6 @@ public:
   FlashStatus getStatus() const;
   void printFlashInfo();
   
-  // Synchronized capture support
-  void prepareForCapture();
-  void finishCapture();
-  bool captureWithAutoFlash(camera_fb_t** fb);
-
 private:
   bool flash_ready;
   uint8_t current_duty;
@@ -81,8 +76,6 @@ private:
   // Internal methods
   bool initializePWM();
   uint8_t analyzeBrightness(camera_fb_t* fb);
-  void updateLightCache();
-  bool validateDutyRange(uint8_t duty);
 };
 
 // Global flash manager instance

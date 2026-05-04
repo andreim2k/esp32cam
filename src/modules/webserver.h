@@ -10,7 +10,6 @@
 
 #define HTTP_BUFFER_SIZE 1024
 #define JSON_BUFFER_SIZE 2048
-#define HTML_BUFFER_SIZE 65536
 #define HTML_CHUNK_SIZE 1024
 #define MAX_PATH_LENGTH 256
 #define MAX_HEADERS_LENGTH 2048
@@ -91,8 +90,6 @@ private:
   void logRequest(const HttpRequest &request);
   void logResponse(const ApiResponse &response);
   void extractQueryParam(const char *query_params, const char *param_name,
-                         char *output, size_t max_len);
-  void extractHttpHeader(const char *headers, const char *header_name,
                          char *output, size_t max_len);
   void urlDecode(const char *str, char *output, size_t max_len);
   void addCorsHeaders(char *headers, size_t max_len);

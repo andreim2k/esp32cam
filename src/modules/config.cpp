@@ -375,33 +375,8 @@ bool ConfigManager::isAPIKeyValid(const char *provided_key) const {
 }
 
 bool ConfigManager::isFirstBoot() const {
-  uint16_t magic = const_cast<ConfigManager *>(this)->readUint16(OFFSET_MAGIC);
+  uint16_t magic = readUint16(OFFSET_MAGIC);
   return magic != CONFIG_MAGIC;
-}
-
-void ConfigManager::enterConfigMode() {
-  Serial.println("Entering WiFi configuration mode...");
-  WiFi.mode(WIFI_AP);
-
-  // Use default password for config AP
-  WiFi.softAP(DEFAULT_SSID, DEFAULT_PASSWORD);
-  Serial.printf("Configuration AP started: SSID=%s, Password=%s\n",
-                DEFAULT_SSID, DEFAULT_PASSWORD);
-  Serial.printf("Connect and visit http://192.168.4.1 to configure\n");
-  // Basic HTTP server for config (integrate with webServerManager)
-  Serial.println("Basic config server starting...");
-  delay(1000);
-}
-
-void ConfigManager::exitConfigMode() {
-  Serial.println("Exiting configuration mode...");
-  WiFi.mode(WIFI_OFF);
-  Serial.println("Configuration mode exited.");
-
-  // Save any pending config if implemented
-  if (isValidConfig()) {
-    saveConfig();
-  }
 }
 
 // Private helper methods
@@ -432,14 +407,14 @@ void ConfigManager::writeUint8(int offset, uint8_t value) {
   EEPROM.write(offset, value);
 }
 
-uint8_t ConfigManager::readUint8(int offset) { return EEPROM.read(offset); }
+uint8_t ConfigManager::readUint8(int offset) const { return EEPROM.read(offset); }
 
 void ConfigManager::writeUint16(int offset, uint16_t value) {
   EEPROM.write(offset, value & 0xFF);
   EEPROM.write(offset + 1, (value >> 8) & 0xFF);
 }
 
-uint16_t ConfigManager::readUint16(int offset) {
+uint16_t ConfigManager::readUint16(int offset) const {
   uint16_t value = EEPROM.read(offset);
   value |= (EEPROM.read(offset + 1) << 8);
   return value;
@@ -451,7 +426,7 @@ void ConfigManager::writeIPAddress(int offset, const IPAddress &addr) {
   }
 }
 
-IPAddress ConfigManager::readIPAddress(int offset) {
+IPAddress ConfigManager::readIPAddress(int offset) const {
   return IPAddress(EEPROM.read(offset), EEPROM.read(offset + 1),
                    EEPROM.read(offset + 2), EEPROM.read(offset + 3));
 }

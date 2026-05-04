@@ -117,8 +117,6 @@ public:
 
   // Configuration mode (for initial setup)
   bool isFirstBoot() const;
-  void enterConfigMode();
-  void exitConfigMode();
 
 private:
   Configuration config;
@@ -127,11 +125,11 @@ private:
   void writeString(int offset, const char *str, int max_len);
   void readString(int offset, char *str, int max_len);
   void writeUint8(int offset, uint8_t value);
-  uint8_t readUint8(int offset);
+  uint8_t readUint8(int offset) const;
   void writeUint16(int offset, uint16_t value);
-  uint16_t readUint16(int offset);
+  uint16_t readUint16(int offset) const;
   void writeIPAddress(int offset, const IPAddress &addr);
-  IPAddress readIPAddress(int offset);
+  IPAddress readIPAddress(int offset) const;
   bool applyLegacyDefaultUpdates(bool force_default_wifi_profile);
   bool validateConfiguration() const;
 };

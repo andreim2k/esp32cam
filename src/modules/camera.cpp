@@ -1,4 +1,5 @@
 #include "camera.h"
+#include "flash.h"
 #include "esp_heap_caps.h"
 #include "soc/soc_memory_types.h"
 
@@ -93,28 +94,6 @@ bool CameraManager::configureCamera(uint8_t jpeg_quality, framesize_t resolution
   config.fb_location = psram_available ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
   config.jpeg_quality = jpeg_quality;
   config.fb_count = psram_available ? 2 : 1;
-
-  // If PSRAM IC is present, keep high-resolution JPEG frame buffers in PSRAM.
-  if(config.pixel_format == PIXFORMAT_JPEG){
-    if(psram_available){
-      config.jpeg_quality = jpeg_quality;
-      config.fb_count = 2;
-      config.fb_location = CAMERA_FB_IN_PSRAM;
-      config.grab_mode = CAMERA_GRAB_LATEST;
-    } else {
-      // Limit the frame size when PSRAM is not available
-      config.frame_size = safe_resolution;
-      config.fb_location = CAMERA_FB_IN_DRAM;
-      config.fb_count = 1; // Use only 1 buffer to save internal RAM
-      config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-    }
-  } else {
-    // Best option for face detection/recognition
-    config.frame_size = FRAMESIZE_240X240;
-#if CONFIG_IDF_TARGET_ESP32S3
-    config.fb_count = 2;
-#endif
-  }
 
   bool using_psram_buffers = psram_available &&
                              config.fb_location == CAMERA_FB_IN_PSRAM;
@@ -286,51 +265,20 @@ camera_fb_t* CameraManager::captureFrame() {
   return fb;
 }
 
-camera_fb_t* CameraManager::captureWithFlash(bool use_flash) {
-  if (!camera_ready) {
-    logCaptureResult(CAPTURE_CAMERA_NOT_READY);
-    return nullptr;
-  }
-  
-  if (frame_buffer_active) {
-    Serial.println("WARNING: Previous frame buffer not released");
-    logCaptureResult(CAPTURE_FAILED);
-    return nullptr;
-  }
-  
-  if (use_flash) {
-    Serial.println("FLASH CAPTURE: Starting synchronized flash capture");
-    delay(200);
-  }
-  
-  // Capture the final frame immediately
-  camera_fb_t* fb = esp_camera_fb_get();
-  
-  if (fb) {
-    if (frame_buffers_in_psram && !esp_ptr_external_ram(fb->buf)) {
-      Serial.println("WARNING: Expected camera frame buffer in PSRAM, but buffer is not external RAM");
-    }
-    frame_buffer_active = true;
-    capture_count++;
-    last_capture_time = millis();
-    last_frame_size = fb->len;
-    logCaptureResult(CAPTURE_SUCCESS);
-    Serial.println("Capture complete");
-  } else {
-    failed_capture_count++;
-    logCaptureResult(CAPTURE_FAILED);
-    Serial.println("Capture failed");
-  }
-  
-  return fb;
-}
 
 CaptureResult CameraManager::captureToBuffer(uint8_t** buffer, size_t* buffer_size, bool use_flash) {
-  camera_fb_t* fb = captureWithFlash(use_flash);
+  if (use_flash) {
+    flashManager.setFlashDuty(FLASH_MEDIUM);
+    delay(100);
+  }
+  camera_fb_t* fb = captureFrame();
+  if (use_flash) {
+    flashManager.setFlashDuty(FLASH_OFF);
+  }
   if (!fb) {
     return CAPTURE_FAILED;
   }
-  
+
   // Allocate copied captures in PSRAM when available.
   *buffer = psramFound() ? (uint8_t*)ps_malloc(fb->len) : nullptr;
   if (!*buffer) {
@@ -340,10 +288,10 @@ CaptureResult CameraManager::captureToBuffer(uint8_t** buffer, size_t* buffer_si
     releaseFrameBuffer(fb);
     return CAPTURE_OUT_OF_MEMORY;
   }
-  
+
   memcpy(*buffer, fb->buf, fb->len);
   *buffer_size = fb->len;
-  
+
   releaseFrameBuffer(fb);
   return CAPTURE_SUCCESS;
 }
