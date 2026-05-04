@@ -87,19 +87,20 @@ public:
   uint32_t getFailedCaptureCount() const { return failed_capture_count; }
   unsigned long getLastCaptureTime() const { return last_capture_time; }
   size_t getLastFrameSize() const { return last_frame_size; }
+  bool isPSRAMAvailable() const { return psramFound(); }
+  bool usesPSRAMFrameBuffers() const { return frame_buffers_in_psram; }
   
   // Utility functions
-  bool warmupCamera(int frames = 3);
   void printCameraInfo();
 
 private:
   bool camera_ready;
   framesize_t current_resolution;
-  framesize_t original_resolution;
   uint32_t capture_count;
   uint32_t failed_capture_count;
   unsigned long last_capture_time;
   size_t last_frame_size;
+  bool frame_buffers_in_psram;
   
   // Default camera settings
   CameraSettings default_settings;

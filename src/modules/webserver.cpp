@@ -52,6 +52,7 @@ void WebServerManager::handleClients() {
 
 void WebServerManager::handleClient(WiFiClient &client) {
   if (!client.connected()) {
+    client.stop();
     return;
   }
 
@@ -120,7 +121,7 @@ bool WebServerManager::parseHttpRequest(WiFiClient &client,
 
   // Parse headers
   unsigned long parse_start = millis();
-  const unsigned long parse_timeout = 5000; // 5 second timeout for header parsing
+  const unsigned long parse_timeout = 1500; // 1.5 second timeout for header parsing
 
   while (client.connected() && !headers_complete) {
     if ((millis() - parse_start) > parse_timeout) {
@@ -187,7 +188,7 @@ bool WebServerManager::parseHttpRequest(WiFiClient &client,
       content_length > 0) {
     int bytes_read = 0;
     unsigned long start_time = millis();
-    const unsigned long timeout_duration = 5000; // 5 second timeout
+    const unsigned long timeout_duration = 1500; // 1.5 second timeout
 
     while (bytes_read < content_length &&
            (millis() - start_time) <
@@ -209,67 +210,6 @@ bool WebServerManager::parseHttpRequest(WiFiClient &client,
  * Extract HTTP header value from headers string
  * Supports formats: "Header-Name: value" or "Header-Name:value"
  */
-void WebServerManager::extractHttpHeader(const char *headers,
-                                         const char *header_name, char *output,
-                                         size_t max_len) {
-  output[0] = '\0';
-
-  if (!headers || !header_name || strlen(headers) == 0) {
-    return;
-  }
-
-  // Search for header name (case-insensitive)
-  size_t header_name_len = strlen(header_name);
-  const char *header_start = headers;
-
-  while (*header_start) {
-    // Find header name
-    if (strncasecmp(header_start, header_name, header_name_len) == 0) {
-      // Check if followed by colon
-      const char *colon_pos = header_start + header_name_len;
-      while (*colon_pos == ' ' || *colon_pos == '\t') {
-        colon_pos++;
-      }
-
-      if (*colon_pos == ':') {
-        colon_pos++; // Skip colon
-        // Skip whitespace after colon
-        while (*colon_pos == ' ' || *colon_pos == '\t') {
-          colon_pos++;
-        }
-
-        // Extract value until newline or end
-        size_t value_len = 0;
-        const char *value_start = colon_pos;
-        while (*colon_pos && *colon_pos != '\r' && *colon_pos != '\n' &&
-               value_len < max_len - 1) {
-          colon_pos++;
-          value_len++;
-        }
-
-        // Copy value
-        strncpy(output, value_start, value_len);
-        output[value_len] = '\0';
-
-        // Trim trailing whitespace
-        size_t len = strlen(output);
-        while (len > 0 && (output[len - 1] == ' ' || output[len - 1] == '\t')) {
-          output[len - 1] = '\0';
-          len--;
-        }
-
-        return;
-      }
-    }
-
-    // Move to next line
-    header_start = strchr(header_start, '\n');
-    if (!header_start)
-      break;
-    header_start++; // Skip newline
-  }
-}
-
 ApiResponse WebServerManager::processRequest(const HttpRequest &request) {
   // Route to appropriate handler - Only essential endpoints
   if (strcmp(request.path, "/") == 0) {
@@ -309,10 +249,21 @@ void WebServerManager::sendResponse(WiFiClient &client,
 
   // Send body
   if (response.is_binary && response.binary_data) {
-    client.write(response.binary_data, response.content_length);
+    if (!response.owns_binary_data) {
+      size_t sent = 0;
+      while (sent < response.content_length) {
+        size_t to_send = (HTML_CHUNK_SIZE < response.content_length - sent) ? HTML_CHUNK_SIZE : (response.content_length - sent);
+        client.write(response.binary_data + sent, to_send);
+        sent += to_send;
+        esp_task_wdt_reset();
+      }
+    } else {
+      client.write(response.binary_data, response.content_length);
+    }
   } else {
     client.print(response.body);
   }
+  client.flush();
 }
 
 // API Endpoints
@@ -323,25 +274,125 @@ ApiResponse WebServerManager::handleRoot() {
           sizeof(response.content_type) - 1);
   response.content_type[sizeof(response.content_type) - 1] = '\0';
 
-  // Allocate HTML buffer on heap to avoid stack overflow
-  char *html_buffer = (char *)malloc(HTML_BUFFER_SIZE);
-  if (!html_buffer) {
-    strcpy(response.body, "<html><body><h1>500 Error</h1><p>Memory allocation failed</p></body></html>");
-    response.status_code = 500;
-    response.is_binary = false;
-    response.binary_data = nullptr;
-    response.content_length = strlen(response.body);
-    return response;
-  }
+  static const char html_content[] = R"rawliteral(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32-CAM Control</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#121826;color:#f7fafc}.wrap{max-width:1240px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,2fr) 360px;gap:16px}.panel{background:#1f2937;border:1px solid #374151;border-radius:8px;padding:16px}.toolbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.field{margin:0 0 12px}.field label{display:block;margin:0 0 6px;color:#cbd5e1;font-size:13px}input,select,button{width:100%;border:1px solid #4b5563;border-radius:7px;background:#111827;color:#f9fafb;padding:10px;font-size:14px}button{cursor:pointer;background:#2563eb;border-color:#2563eb;font-weight:700}.secondary{background:#374151;border-color:#4b5563}.danger{background:#b91c1c;border-color:#b91c1c}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.stat{background:#111827;border:1px solid #374151;border-radius:7px;padding:10px}.stat b{display:block;color:#93c5fd;font-size:12px;margin-bottom:4px}.muted{color:#9ca3af}.ok{color:#86efac}.bad{color:#fca5a5}.imageBox{position:relative;min-height:320px;display:flex;align-items:center;justify-content:center;background:#0f172a;border:1px dashed #475569;border-radius:8px;overflow:hidden}.imageBox img{max-width:100%;max-height:70vh;display:none}.watermark{position:absolute;left:12px;bottom:12px;max-width:calc(100% - 24px);padding:8px 10px;border-radius:7px;background:rgba(15,23,42,.72);color:#dbeafe;font-weight:700;font-size:13px;line-height:1.25;pointer-events:none;backdrop-filter:blur(4px);box-shadow:0 4px 14px rgba(0,0,0,.25)}.watermark.error{color:#fecaca;background:rgba(127,29,29,.82)}.statusLine{margin-top:10px;color:#cbd5e1}h1,h2{margin:0 0 14px}h1{font-size:24px}h2{font-size:18px}@media(max-width:900px){.wrap{grid-template-columns:1fr}.toolbar,.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <main class="panel">
+    <h1>ESP32-CAM</h1>
+    <div class="toolbar">
+      <div class="field"><label>Resolution</label><select id="resolution"><option>UXGA</option><option>SXGA</option><option>XGA</option><option>SVGA</option><option>VGA</option><option>QVGA</option></select></div>
+      <div class="field"><label>JPEG quality</label><input id="quality" type="number" min="0" max="63" value="10"></div>
+      <div class="field"><label>Flash</label><select id="flash"><option value="false">Off</option><option value="true">On</option></select></div>
+      <div class="field"><label>&nbsp;</label><button id="capture">Snapshot</button></div>
+    </div>
+    <div class="imageBox"><span id="placeholder" class="muted">No image captured yet</span><img id="photo" alt="Captured frame"><div id="captureStatus" class="watermark">Ready</div></div>
+  </main>
+  <aside>
+    <section class="panel">
+      <h2>Network</h2>
+      <div class="grid">
+        <div class="stat"><b>SSID</b><span id="wifiSsid">-</span></div>
+        <div class="stat"><b>IP</b><span id="wifiIp">-</span></div>
+        <div class="stat"><b>Mode</b><span id="wifiMode">-</span></div>
+        <div class="stat"><b>Signal</b><span id="wifiSignal">-</span></div>
+        <div class="stat"><b>Gateway</b><span id="wifiGateway">-</span></div>
+        <div class="stat"><b>MAC</b><span id="wifiMac">-</span></div>
+      </div>
+      <div class="stat" style="margin-top:10px"><b>Protocol</b><span id="wifiProtocol">-</span></div>
+      <div class="stat" style="margin-top:10px"><b>Speed</b><span id="wifiSpeed">-</span></div>
+      <div class="stat" style="margin-top:10px"><b>Bandwidth</b><span id="wifiBandwidth">-</span></div>
+    </section>
+    <section class="panel" style="margin-top:16px">
+      <h2>WiFi Settings</h2>
+      <div class="field"><label>SSID</label><input id="wifiInputSsid" placeholder="SSID"></div>
+      <div class="field"><label>Password</label><input id="wifiInputPassword" type="password" placeholder="Leave blank to keep current"></div>
+      <div class="field"><label>Speed / range mode</label><select id="wifiInputBandwidth"><option value="0">Max range - 802.11b</option><option value="1">Balanced - HT20</option><option value="2">Max speed - HT40</option></select></div>
+      <button id="saveWifi">Save to EEPROM and reconnect</button>
+      <button id="togglePassword" class="secondary" style="margin-top:8px">Show password</button>
+      <div id="wifiResult" class="statusLine"></div>
+    </section>
+    <section class="panel" style="margin-top:16px">
+      <h2>Camera</h2>
+      <div class="grid">
+        <div class="stat"><b>Ready</b><span id="camReady">-</span></div>
+        <div class="stat"><b>Resolution</b><span id="camResolution">-</span></div>
+        <div class="stat"><b>PSRAM</b><span id="camPsram">-</span></div>
+        <div class="stat"><b>FB in PSRAM</b><span id="camFb">-</span></div>
+      </div>
+    </section>
+  </aside>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+function setText(id,value){$(id).textContent=value??'-'}
+function bandwidthValue(label){if((label||'').includes('HT40'))return '2';if((label||'').includes('HT20'))return '1';return '0'}
+async function refreshStatus(){
+  try{
+    const r=await fetch('/status');
+    const d=await r.json();
+    setText('wifiSsid',d.wifi.ssid); setText('wifiIp',d.wifi.ip); setText('wifiMode',d.wifi.mode);
+    setText('wifiSignal',`${d.wifi.rssi} dBm (${d.wifi.signal_percentage}%)`);
+    setText('wifiGateway',d.wifi.gateway); setText('wifiMac',d.wifi.mac);
+    setText('wifiProtocol',d.wifi.protocol); setText('wifiSpeed',d.wifi.speed); setText('wifiBandwidth',d.wifi.bandwidth);
+    setText('camReady',d.camera.ready?'yes':'no'); setText('camResolution',d.camera.resolution);
+    setText('camPsram',d.camera.psram_available?'yes':'no'); setText('camFb',d.camera.frame_buffers_in_psram?'yes':'no');
+    $('wifiInputSsid').placeholder=d.wifi.ssid||'SSID';
+    $('wifiInputBandwidth').value=bandwidthValue(d.wifi.bandwidth);
+  }catch(e){setText('wifiResult','Status load failed: '+e.message)}
+}
+async function capture(){
+  $('captureStatus').className='watermark';
+  $('captureStatus').textContent='Capturing...';
+  const payload={resolution:$('resolution').value,quality:parseInt($('quality').value,10),flash:$('flash').value==='true'};
+  try{
+    const r=await fetch('/snapshot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!r.ok)throw new Error(await r.text());
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    $('photo').src=url; $('photo').style.display='block'; $('placeholder').style.display='none';
+    $('captureStatus').className='watermark';
+    $('captureStatus').textContent='Captured';
+    refreshStatus();
+  }catch(e){$('captureStatus').className='watermark error';$('captureStatus').textContent='Capture failed: '+e.message}
+}
+async function saveWifi(){
+  const payload={bandwidth:parseInt($('wifiInputBandwidth').value,10)};
+  const ssid=$('wifiInputSsid').value.trim();
+  const pass=$('wifiInputPassword').value;
+  if(ssid)payload.ssid=ssid;
+  if(pass)payload.password=pass;
+  $('wifiResult').textContent='Saving to EEPROM...';
+  try{
+    const r=await fetch('/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const d=await r.json();
+    $('wifiResult').textContent=d.message||JSON.stringify(d);
+    if(d.reconnect_requested)setTimeout(refreshStatus,5000);
+  }catch(e){$('wifiResult').textContent='Save request sent; reconnect may be in progress.'}
+}
+$('capture').addEventListener('click',capture);
+$('saveWifi').addEventListener('click',saveWifi);
+$('togglePassword').addEventListener('click',()=>{$('wifiInputPassword').type=$('wifiInputPassword').type==='password'?'text':'password'});
+refreshStatus();
+setInterval(refreshStatus,15000);
+</script>
+</body>
+</html>
+)rawliteral";
 
-  generateWebPage(html_buffer, HTML_BUFFER_SIZE);
-
-  // Use binary_data pointer to avoid copying large buffer
   response.is_binary = true;
-  response.binary_data = (uint8_t *)html_buffer;
-  response.owns_binary_data = true;
-  response.content_length = strlen(html_buffer);
-  response.body[0] = '\0';  // Clear body since we're using binary_data
+  response.binary_data = (uint8_t *)html_content;
+  response.owns_binary_data = false;
+  response.content_length = strlen(html_content);
 
   return response;
 }
@@ -421,14 +472,20 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest &request) {
     return response;
   }
 
+  // Discard the frame buffered before applySettings() so the captured image
+  // uses the new settings/resolution and is not a pre-flash frame.
+  {
+    camera_fb_t *stale = cameraManager.captureFrame();
+    if (stale) cameraManager.releaseFrameBuffer(stale);
+  }
+
   // Handle flash
   if (use_flash) {
     flashManager.setFlashDuty(FLASH_MEDIUM);
-    delay(200); // Stabilization
+    delay(150); // Stabilization
   }
 
-  // Capture with warm-up frames
-  cameraManager.warmupCamera(3);
+  // Capture frame
   camera_fb_t *fb = cameraManager.captureFrame();
 
   // Turn off flash
@@ -511,12 +568,14 @@ ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
     return response;
   }
 
-  if (!configManager.saveConfig()) {
-    response.status_code = 500;
-    createErrorResponse("Failed to save settings to EEPROM", 500, response.body, sizeof(response.body));
-    return response;
+  if (ssid_changed || password_changed || bandwidth_changed) {
+    if (!configManager.saveConfig()) {
+      response.status_code = 500;
+      createErrorResponse("Failed to save settings to EEPROM", 500, response.body, sizeof(response.body));
+      return response;
+    }
+    wifi_reconnect_requested = true;
   }
-  wifi_reconnect_requested = true;
 
   JsonDocument resp;
   resp["status"] = "success";
@@ -530,10 +589,12 @@ ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
              password_changed ? " (Password)" : "",
              bandwidth_changed ? " (Bandwidth)" : "");
   } else {
-    snprintf(message, sizeof(message), "✓ Settings confirmed and saved to EEPROM - Reconnecting...");
+    snprintf(message, sizeof(message), "✓ Settings unchanged - current values are already stored in EEPROM");
   }
 
   resp["message"] = message;
+  resp["saved_to_eeprom"] = (ssid_changed || password_changed || bandwidth_changed);
+  resp["reconnect_requested"] = (ssid_changed || password_changed || bandwidth_changed);
   resp["ssid_changed"] = ssid_changed;
   serializeJson(resp, response.body, sizeof(response.body));
   return response;
@@ -780,6 +841,8 @@ void WebServerManager::generateStatusJson(JsonDocument &doc) {
                                     resolution_str, sizeof(resolution_str));
   camera["resolution"] = resolution_str;
   camera["ready"] = cameraManager.isReady();
+  camera["psram_available"] = cameraManager.isPSRAMAvailable();
+  camera["frame_buffers_in_psram"] = cameraManager.usesPSRAMFrameBuffers();
   camera["total_captures"] = cameraManager.getTotalCaptureCount();
   camera["failed_captures"] = cameraManager.getFailedCaptureCount();
 }
@@ -888,1289 +951,4 @@ int WebServerManager::getWiFiSignalPercentage() {
     // -70dBm = 20%, -80dBm = 0%
     return 2 * (rssi + 80);
   }
-}
-
-void WebServerManager::generateWebPage(char *output, size_t max_len) {
-  // Serve the updated HTML content with toggle buttons and spinner
-  const char *html_content =
-      "<!DOCTYPE html>\n"
-      "<html lang=\"en\">\n"
-      "<head>\n"
-      "    <meta charset=\"UTF-8\">\n"
-      "    <meta name=\"viewport\" content=\"width=device-width, "
-      "initial-scale=1.0\">\n"
-      "    <title>ESP32-CAM Live Stream</title>\n"
-      "    <style>\n"
-      "        * {\n"
-      "            margin: 0;\n"
-      "            padding: 0;\n"
-      "            box-sizing: border-box;\n"
-      "        }\n"
-      "\n"
-      "        body {\n"
-      "            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, "
-      "sans-serif;\n"
-      "            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 "
-      "100%);\n"
-      "            color: #fff;\n"
-      "            min-height: 100vh;\n"
-      "        }\n"
-      "\n"
-      "        .container {\n"
-      "            max-width: 1400px;\n"
-      "            margin: 0 auto;\n"
-      "            padding: 20px;\n"
-      "            display: grid;\n"
-      "            grid-template-columns: 2fr 1fr;\n"
-      "            gap: 20px;\n"
-      "            min-height: 100vh;\n"
-      "        }\n"
-      "\n"
-      "        .left-column {\n"
-      "            display: flex;\n"
-      "            flex-direction: column;\n"
-      "            gap: 20px;\n"
-      "        }\n"
-      "\n"
-      "        .video-section {\n"
-      "            background: rgba(255, 255, 255, 0.1);\n"
-      "            border-radius: 15px;\n"
-      "            padding: 20px;\n"
-      "            backdrop-filter: blur(10px);\n"
-      "            border: 1px solid rgba(255, 255, 255, 0.2);\n"
-      "        }\n"
-      "\n"
-      "        .controls-section {\n"
-      "            display: flex;\n"
-      "            flex-direction: column;\n"
-      "            gap: 20px;\n"
-      "        }\n"
-      "\n"
-      "        .control-panel, .payload-panel {\n"
-      "            background: rgba(255, 255, 255, 0.1);\n"
-      "            border-radius: 15px;\n"
-      "            padding: 20px;\n"
-      "            backdrop-filter: blur(10px);\n"
-      "            border: 1px solid rgba(255, 255, 255, 0.2);\n"
-      "        }\n"
-      "\n"
-      "        h1, h2 {\n"
-      "            text-align: center;\n"
-      "            margin-bottom: 20px;\n"
-      "            color: #fff;\n"
-      "        }\n"
-      "\n"
-      "        #stream-container {\n"
-      "            position: relative;\n"
-      "            width: 100%;\n"
-      "            max-width: 100%;\n"
-      "            border-radius: 10px;\n"
-      "            overflow: hidden;\n"
-      "            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);\n"
-      "        }\n"
-      "\n"
-      "        #camera-display {\n"
-      "            width: 100%;\n"
-      "            height: auto;\n"
-      "            display: block;\n"
-      "            max-height: 70vh;\n"
-      "            object-fit: contain;\n"
-      "            background: rgba(255, 255, 255, 0.1);\n"
-      "            border: 2px dashed rgba(255, 255, 255, 0.3);\n"
-      "            min-height: 300px;\n"
-      "        }\n"
-      "        \n"
-      "        #camera-placeholder {\n"
-      "            display: flex;\n"
-      "            justify-content: center;\n"
-      "            align-items: center;\n"
-      "            height: 300px;\n"
-      "            color: rgba(255, 255, 255, 0.6);\n"
-      "            font-size: 18px;\n"
-      "            text-align: center;\n"
-      "        }\n"
-      "\n"
-      "        .photo-overlay {\n"
-      "            position: absolute;\n"
-      "            top: 10px;\n"
-      "            right: 10px;\n"
-      "            background: rgba(0, 0, 0, 0.7);\n"
-      "            color: #fff;\n"
-      "            padding: 8px 12px;\n"
-      "            border-radius: 5px;\n"
-      "            font-size: 12px;\n"
-      "            font-family: monospace;\n"
-      "        }\n"
-      "\n"
-      "        .control-group {\n"
-      "            margin-bottom: 20px;\n"
-      "        }\n"
-      "\n"
-      "        .control-group label {\n"
-      "            display: block;\n"
-      "            margin-bottom: 8px;\n"
-      "            font-weight: 600;\n"
-      "            color: #fff;\n"
-      "        }\n"
-      "\n"
-      "        .slider-container {\n"
-      "            position: relative;\n"
-      "            margin-bottom: 15px;\n"
-      "        }\n"
-      "\n"
-      "        .slider {\n"
-      "            width: 100%;\n"
-      "            height: 6px;\n"
-      "            border-radius: 3px;\n"
-      "            background: rgba(255, 255, 255, 0.3);\n"
-      "            outline: none;\n"
-      "            -webkit-appearance: none;\n"
-      "            appearance: none;\n"
-      "        }\n"
-      "\n"
-      "        .slider::-webkit-slider-thumb {\n"
-      "            appearance: none;\n"
-      "            width: 20px;\n"
-      "            height: 20px;\n"
-      "            border-radius: 50%;\n"
-      "            background: #4CAF50;\n"
-      "            cursor: pointer;\n"
-      "            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);\n"
-      "        }\n"
-      "\n"
-      "        .slider::-moz-range-thumb {\n"
-      "            width: 20px;\n"
-      "            height: 20px;\n"
-      "            border-radius: 50%;\n"
-      "            background: #4CAF50;\n"
-      "            cursor: pointer;\n"
-      "            border: none;\n"
-      "            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);\n"
-      "        }\n"
-      "\n"
-      "        .slider-value {\n"
-      "            position: absolute;\n"
-      "            right: 0;\n"
-      "            top: -25px;\n"
-      "            background: #4CAF50;\n"
-      "            color: white;\n"
-      "            padding: 2px 8px;\n"
-      "            border-radius: 12px;\n"
-      "            font-size: 12px;\n"
-      "            font-weight: bold;\n"
-      "        }\n"
-      "\n"
-      "        .glass-input {\n"
-      "            width: 100%;\n"
-      "            padding: 12px;\n"
-      "            margin-bottom: 10px;\n"
-      "            border: 1px solid rgba(255, 255, 255, 0.2);\n"
-      "            border-radius: 8px;\n"
-      "            background: rgba(255, 255, 255, 0.1);\n"
-      "            color: #fff;\n"
-      "            font-size: 14px;\n"
-      "            outline: none;\n"
-      "            transition: all 0.3s ease;\n"
-      "        }\n"
-      "\n"
-      "        .glass-input:focus {\n"
-      "            background: rgba(255, 255, 255, 0.2);\n"
-      "            border-color: rgba(255, 255, 255, 0.4);\n"
-      "        }\n"
-      "\n"
-      "        select, button {\n"
-      "            width: 100%;\n"
-      "            padding: 12px;\n"
-      "            margin-bottom: 10px;\n"
-      "            border: none;\n"
-      "            border-radius: 8px;\n"
-      "            background: rgba(255, 255, 255, 0.2);\n"
-      "            color: #fff;\n"
-      "            font-size: 14px;\n"
-      "            cursor: pointer;\n"
-      "            transition: all 0.3s ease;\n"
-      "        }\n"
-      "\n"
-      "        select option {\n"
-      "            background: #1e3c72;\n"
-      "            color: #fff;\n"
-      "        }\n"
-      "\n"
-      "        button {\n"
-      "            background: linear-gradient(45deg, #4CAF50, #45a049);\n"
-      "            font-weight: 600;\n"
-      "            text-transform: uppercase;\n"
-      "            letter-spacing: 0.5px;\n"
-      "        }\n"
-      "\n"
-      "        button:hover {\n"
-      "            transform: translateY(-2px);\n"
-      "            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);\n"
-      "        }\n"
-      "\n"
-      "        button:active {\n"
-      "            transform: translateY(0);\n"
-      "        }\n"
-      "\n"
-      "        .flash-controls {\n"
-      "            display: grid;\n"
-      "            grid-template-columns: 1fr 1fr;\n"
-      "            gap: 10px;\n"
-      "        }\n"
-      "\n"
-      "        .flash-controls button {\n"
-      "            margin: 0;\n"
-      "        }\n"
-      "\n"
-      "        .payload-display {\n"
-      "            background: #1a1a2e;\n"
-      "            border-radius: 8px;\n"
-      "            padding: 15px;\n"
-      "            font-family: 'Courier New', monospace;\n"
-      "            font-size: 12px;\n"
-      "            line-height: 1.4;\n"
-      "            max-height: 300px;\n"
-      "            overflow-y: auto;\n"
-      "            border: 1px solid rgba(255, 255, 255, 0.1);\n"
-      "        }\n"
-      "\n"
-      "        .payload-display pre {\n"
-      "            margin: 0;\n"
-      "            white-space: pre-wrap;\n"
-      "            word-wrap: break-word;\n"
-      "        }\n"
-      "\n"
-      "        .status-indicator {\n"
-      "            display: inline-block;\n"
-      "            width: 10px;\n"
-      "            height: 10px;\n"
-      "            border-radius: 50%;\n"
-      "            margin-right: 8px;\n"
-      "        }\n"
-      "\n"
-      "        .status-connected {\n"
-      "            background: #4CAF50;\n"
-      "            box-shadow: 0 0 10px #4CAF50;\n"
-      "        }\n"
-      "\n"
-      "        .status-disconnected {\n"
-      "            background: #f44336;\n"
-      "            box-shadow: 0 0 10px #f44336;\n"
-      "        }\n"
-      "\n"
-      "        .timestamp {\n"
-      "            color: #888;\n"
-      "            font-size: 10px;\n"
-      "            margin-bottom: 10px;\n"
-      "        }\n"
-      "\n"
-      "        @media (max-width: 1024px) {\n"
-      "            .container {\n"
-      "                grid-template-columns: 1fr;\n"
-      "                gap: 15px;\n"
-      "            }\n"
-      "            \n"
-      "            .left-column {\n"
-      "                order: 1;\n"
-      "            }\n"
-      "            \n"
-      "            .controls-section {\n"
-      "                order: 2;\n"
-      "            }\n"
-      "        }\n"
-      "\n"
-      "        .loading {\n"
-      "            display: flex;\n"
-      "            justify-content: center;\n"
-      "            align-items: center;\n"
-      "            height: 300px;\n"
-      "            font-size: 18px;\n"
-      "            color: #ccc;\n"
-      "        }\n"
-      "\n"
-      "        .wifi-info-grid {\n"
-      "            display: grid;\n"
-      "            grid-template-columns: repeat(auto-fit, minmax(250px, "
-      "1fr));\n"
-      "            gap: 15px;\n"
-      "            margin-bottom: 20px;\n"
-      "        }\n"
-      "\n"
-      "        .info-item {\n"
-      "            background: rgba(255, 255, 255, 0.05);\n"
-      "            padding: 12px;\n"
-      "            border-radius: 8px;\n"
-      "            border: 1px solid rgba(255, 255, 255, 0.1);\n"
-      "        }\n"
-      "\n"
-      "        .info-item label {\n"
-      "            display: block;\n"
-      "            font-size: 12px;\n"
-      "            color: rgba(255, 255, 255, 0.7);\n"
-      "            margin-bottom: 5px;\n"
-      "            text-transform: uppercase;\n"
-      "            letter-spacing: 0.5px;\n"
-      "        }\n"
-      "\n"
-      "        .info-value {\n"
-      "            font-size: 14px;\n"
-      "            font-weight: 600;\n"
-      "            color: #fff;\n"
-      "            font-family: 'Courier New', monospace;\n"
-      "        }\n"
-      "\n"
-      "        .wifi-status {\n"
-      "            display: flex;\n"
-      "            align-items: center;\n"
-      "            justify-content: center;\n"
-      "            padding: 15px;\n"
-      "            background: rgba(255, 255, 255, 0.05);\n"
-      "            border-radius: 8px;\n"
-      "            border: 1px solid rgba(255, 255, 255, 0.1);\n"
-      "        }\n"
-      "\n"
-      "        .checkbox-group {\n"
-      "            display: flex;\n"
-      "            flex-direction: column;\n"
-      "            gap: 10px;\n"
-      "        }\n"
-      "\n"
-      "        .checkbox-label {\n"
-      "            display: flex;\n"
-      "            align-items: center;\n"
-      "            cursor: pointer;\n"
-      "            font-size: 14px;\n"
-      "            font-weight: normal !important;\n"
-      "            margin-bottom: 0 !important;\n"
-      "        }\n"
-      "\n"
-      "        /* Toggle control styles */\n"
-      "        .toggle-control {\n"
-      "            display: flex;\n"
-      "            align-items: center;\n"
-      "            justify-content: space-between;\n"
-      "            margin-bottom: 15px;\n"
-      "        }\n"
-      "\n"
-      "        .toggle-control label {\n"
-      "            margin-bottom: 0 !important;\n"
-      "            font-weight: 500;\n"
-      "            color: #fff;\n"
-      "        }\n"
-      "\n"
-      "        .toggle-switch {\n"
-      "            position: relative;\n"
-      "            width: 60px;\n"
-      "            height: 30px;\n"
-      "            background: rgba(255, 255, 255, 0.3);\n"
-      "            border-radius: 15px;\n"
-      "            cursor: pointer;\n"
-      "            transition: all 0.3s ease;\n"
-      "            border: none;\n"
-      "            outline: none;\n"
-      "        }\n"
-      "\n"
-      "        .toggle-switch.on {\n"
-      "            background: rgba(76, 175, 80, 0.8);\n"
-      "        }\n"
-      "\n"
-      "        .toggle-switch::before {\n"
-      "            content: '';\n"
-      "            position: absolute;\n"
-      "            top: 3px;\n"
-      "            left: 3px;\n"
-      "            width: 24px;\n"
-      "            height: 24px;\n"
-      "            background: #fff;\n"
-      "            border-radius: 50%;\n"
-      "            transition: all 0.3s ease;\n"
-      "            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);\n"
-      "        }\n"
-      "\n"
-      "        .toggle-switch.on::before {\n"
-      "            transform: translateX(30px);\n"
-      "        }\n"
-      "\n"
-      "        .toggle-switch:hover {\n"
-      "            transform: scale(1.05);\n"
-      "        }\n"
-      "\n"
-      "        .toggle-switch:active {\n"
-      "            transform: scale(0.95);\n"
-      "        }\n"
-      "\n"
-      "        /* Spinner styles */\n"
-      "        .spinner-overlay {\n"
-      "            position: absolute;\n"
-      "            top: 0;\n"
-      "            left: 0;\n"
-      "            right: 0;\n"
-      "            bottom: 0;\n"
-      "            background: rgba(0, 0, 0, 0.8);\n"
-      "            display: none;\n"
-      "            justify-content: center;\n"
-      "            align-items: center;\n"
-      "            border-radius: 10px;\n"
-      "            z-index: 10;\n"
-      "        }\n"
-      "\n"
-      "        .spinner-container {\n"
-      "            display: flex;\n"
-      "            flex-direction: column;\n"
-      "            align-items: center;\n"
-      "            justify-content: center;\n"
-      "        }\n"
-      "\n"
-      "        .spinner {\n"
-      "            width: 60px;\n"
-      "            height: 60px;\n"
-      "            border: 4px solid rgba(255, 255, 255, 0.3);\n"
-      "            border-top: 4px solid #4CAF50;\n"
-      "            border-radius: 50%;\n"
-      "            animation: spin 1s linear infinite;\n"
-      "            margin-bottom: 15px;\n"
-      "        }\n"
-      "\n"
-      "        .spinner-text {\n"
-      "            color: #fff;\n"
-      "            font-size: 16px;\n"
-      "            font-weight: 600;\n"
-      "            text-align: center;\n"
-      "        }\n"
-      "\n"
-      "        @keyframes spin {\n"
-      "            0% { transform: rotate(0deg); }\n"
-      "            100% { transform: rotate(360deg); }\n"
-      "        }\n"
-      "\n"
-      "        @media (max-width: 768px) {\n"
-      "            .wifi-info-grid {\n"
-      "                grid-template-columns: 1fr;\n"
-      "            }\n"
-      "        }\n"
-      "\n"
-      "    </style>\n"
-      "</head>\n"
-      "<body>\n"
-      "    <div class=\"container\">\n"
-      "        <div class=\"left-column\">\n"
-      "            <div class=\"video-section\">\n"
-      "                <h1>ESP32-CAM Photo Capture</h1>\n"
-      "                <div id=\"stream-container\">\n"
-      "                    <div id=\"camera-placeholder\">\n"
-      "                        <div>\n"
-      "                            <p>Click \"Take Photo\" to capture an "
-      "image</p>\n"
-      "                            <p style=\"font-size: 14px; margin-top: "
-      "10px; color: rgba(255, 255, 255, 0.4);\">Adjust settings below and "
-      "click capture</p>\n"
-      "                        </div>\n"
-      "                    </div>\n"
-      "                    <img id=\"camera-display\" src=\"\" alt=\"ESP32-CAM "
-      "Photo\" style=\"display: none;\">\n"
-      "                    <div class=\"photo-overlay\" style=\"display: "
-      "none;\">\n"
-      "                        <span class=\"status-indicator\" "
-      "id=\"connection-status\"></span>\n"
-      "                        <span id=\"photo-status\">Ready</span>\n"
-      "                    </div>\n"
-      "                    <div class=\"spinner-overlay\" "
-      "id=\"spinner-overlay\">\n"
-      "                        <div class=\"spinner-container\">\n"
-      "                            <div class=\"spinner\"></div>\n"
-      "                            <div class=\"spinner-text\">Capturing "
-      "Photo...</div>\n"
-      "                        </div>\n"
-      "                    </div>\n"
-      "                </div>\n"
-      "            </div>\n"
-      "\n"
-      "            <div class=\"video-section\">\n"
-      "                <h2>WiFi Settings</h2>\n"
-      "                <div class=\"wifi-info-grid\">\n"
-      "                    <div class=\"info-item\">\n"
-      "                        <label>Network Name (SSID):</label>\n"
-      "                        <div class=\"info-value\" "
-      "id=\"wifi-ssid\">Loading...</div>\n"
-      "                    </div>\n"
-      "                    <div class=\"info-item\">\n"
-      "                        <label>IP Address:</label>\n"
-      "                        <div class=\"info-value\" "
-      "id=\"wifi-ip\">Loading...</div>\n"
-      "                    </div>\n"
-      "                    <div class=\"info-item\">\n"
-      "                        <label>Connection Mode:</label>\n"
-      "                        <div class=\"info-value\" "
-      "id=\"wifi-mode\">Loading...</div>\n"
-      "                    </div>\n"
-      "                    <div class=\"info-item\">\n"
-      "                        <label>Signal Strength:</label>\n"
-      "                        <div class=\"info-value\" "
-      "id=\"wifi-signal\">Loading...</div>\n"
-      "                    </div>\n"
-      "                    <div class=\"info-item\">\n"
-      "                        <label>TX Power:</label>\n"
-      "                        <div class=\"info-value\" "
-      "id=\"wifi-txpower\">Loading...</div>\n"
-      "                    </div>\n"
-      "                    <div class=\"info-item\">\n"
-      "                        <label>Gateway:</label>\n"
-      "                        <div class=\"info-value\" "
-      "id=\"wifi-gateway\">Loading...</div>\n"
-      "                    </div>\n"
-      "                    <div class=\"info-item\">\n"
-      "                        <label>MAC Address:</label>\n"
-      "                        <div class=\"info-value\" "
-      "id=\"wifi-mac\">Loading...</div>\n"
-      "                    </div>\n"
-      "                    <div class=\"info-item\">\n"
-      "                        <label>WiFi Protocol:</label>\n"
-      "                        <div class=\"info-value\" "
-      "id=\"wifi-protocol\">Loading...</div>\n"
-      "                    </div>\n"
-      "                    <div class=\"info-item\">\n"
-      "                        <label>Connection Speed:</label>\n"
-      "                        <div class=\"info-value\" "
-      "id=\"wifi-speed\">Loading...</div>\n"
-      "                    </div>\n"
-      "                    <div class=\"info-item\">\n"
-      "                        <label>Channel Bandwidth:</label>\n"
-      "                        <div class=\"info-value\" "
-      "id=\"wifi-bandwidth\">Loading...</div>\n"
-      "                    </div>\n"
-      "                </div>\n"
-      "                <div class=\"wifi-status\">\n"
-      "                    <span class=\"status-indicator\" "
-      "id=\"wifi-status-indicator\"></span>\n"
-      "                    <span id=\"wifi-status-text\">Checking "
-      "connection...</span>\n"
-      "                </div>\n"
-      "\n"
-      "                <hr style=\"border-color: rgba(255,255,255,0.15); margin: 20px 0;\">\n"
-      "                <h3 style=\"margin-top: 20px; margin-bottom: 15px; text-align: center;\">WiFi Config</h3>\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label for=\"wifi-ssid-input\">New SSID:</label>\n"
-      "                    <input type=\"text\" id=\"wifi-ssid-input\" class=\"glass-input\" maxlength=\"63\" placeholder=\"Network name\">\n"
-      "                </div>\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label for=\"wifi-pw-input\">Password:</label>\n"
-      "                    <div style=\"display:flex; gap:10px;\">\n"
-      "                        <input type=\"password\" id=\"wifi-pw-input\" class=\"glass-input\" style=\"flex:1;\" maxlength=\"63\" placeholder=\"Password\">\n"
-      "                        <button id=\"wifi-toggle-pw\" style=\"width:80px; padding:10px; background: rgba(255, 255, 255, 0.2); border: none; color: white; border-radius: 8px; cursor: pointer;\">SHOW</button>\n"
-      "                    </div>\n"
-      "                </div>\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label for=\"wifi-bw-select\">Bandwidth:</label>\n"
-      "                    <select id=\"wifi-bw-select\" class=\"glass-input\">\n"
-      "                        <option value=\"0\">📡 Max Range (Slowest) - 802.11b</option>\n"
-      "                        <option value=\"1\">⚖️ Balanced Speed - HT20</option>\n"
-      "                        <option value=\"2\">⚡ Max Speed (Close Range) - HT40</option>\n"
-      "                    </select>\n"
-      "                </div>\n"
-      "                <button id=\"wifi-apply-btn\" style=\"background: linear-gradient(45deg, #4CAF50, #45a049); border: none; color: white; width: 100%; padding: 12px; border-radius: 8px; font-weight: 600; cursor: pointer; text-transform: uppercase;\">APPLY WIFI SETTINGS</button>\n"
-      "                <div id=\"wifi-result\" style=\"margin-top: 15px; padding: 10px; border-radius: 8px; display: none; text-align: center; font-size: 13px;\"></div>\n"      "            </div>\n"
-      "        </div>\n"
-      "\n"
-      "        <div class=\"controls-section\">\n"
-      "            <div class=\"control-panel\">\n"
-      "                <h2>Camera Controls</h2>\n"
-      "                \n"
-      "                <div class=\"control-group\">\n"
-      "                    <label for=\"resolution-select\">Resolution:</label>\n"
-      "                    <select id=\"resolution-select\">\n"
-      "                        <option value=\"UXGA\">UXGA (1600x1200)</option>\n"
-      "                        <option value=\"SXGA\">SXGA (1280x1024)</option>\n"
-      "                        <option value=\"XGA\">XGA (1024x768)</option>\n"
-      "                        <option value=\"SVGA\">SVGA (800x600)</option>\n"
-      "                        <option value=\"VGA\" selected>VGA (640x480)</option>\n"
-      "                        <option value=\"CIF\">CIF (400x296)</option>\n"
-      "                        <option value=\"QVGA\">QVGA (320x240)</option>\n"
-      "                    </select>\n"
-      "                </div>\n"
-      "\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label>Brightness:</label>\n"
-      "                    <div class=\"slider-container\">\n"
-      "                        <input type=\"range\" id=\"brightness-slider\" "
-      "class=\"slider\" min=\"-2\" max=\"2\" value=\"0\" step=\"1\">\n"
-      "                        <span class=\"slider-value\" "
-      "id=\"brightness-value\">0</span>\n"
-      "                    </div>\n"
-      "                </div>\n"
-      "\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label>Contrast:</label>\n"
-      "                    <div class=\"slider-container\">\n"
-      "                        <input type=\"range\" id=\"contrast-slider\" "
-      "class=\"slider\" min=\"-2\" max=\"2\" value=\"2\" step=\"1\">\n"
-      "                        <span class=\"slider-value\" "
-      "id=\"contrast-value\">2</span>\n"
-      "                    </div>\n"
-      "                </div>\n"
-      "\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label>Exposure:</label>\n"
-      "                    <div class=\"slider-container\">\n"
-      "                        <input type=\"range\" id=\"exposure-slider\" "
-      "class=\"slider\" min=\"0\" max=\"1200\" value=\"300\" step=\"50\">\n"
-      "                        <span class=\"slider-value\" "
-      "id=\"exposure-value\">300</span>\n"
-      "                    </div>\n"
-      "                </div>\n"
-      "\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label>JPEG Quality:</label>\n"
-      "                    <div class=\"slider-container\">\n"
-      "                        <input type=\"range\" id=\"quality-slider\" "
-      "class=\"slider\" min=\"10\" max=\"63\" value=\"10\" step=\"1\">\n"
-      "                        <span class=\"slider-value\" "
-      "id=\"quality-value\">10</span>\n"
-      "                        <small style=\"color: #aaa; display: block; "
-      "margin-top: 4px;\">10 = Best, 63 = Worst</small>\n"
-      "                    </div>\n"
-      "                </div>\n"
-      "\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label>Saturation:</label>\n"
-      "                    <div class=\"slider-container\">\n"
-      "                        <input type=\"range\" id=\"saturation-slider\" "
-      "class=\"slider\" min=\"-2\" max=\"2\" value=\"1\" step=\"1\">\n"
-      "                        <span class=\"slider-value\" "
-      "id=\"saturation-value\">1</span>\n"
-      "                    </div>\n"
-      "                </div>\n"
-      "\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label>Gain:</label>\n"
-      "                    <div class=\"slider-container\">\n"
-      "                        <input type=\"range\" id=\"gain-slider\" "
-      "class=\"slider\" min=\"0\" max=\"30\" value=\"1\" step=\"1\">\n"
-      "                        <span class=\"slider-value\" "
-      "id=\"gain-value\">1</span>\n"
-      "                    </div>\n"
-      "                </div>\n"
-      "\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label>Special Effect:</label>\n"
-      "                    <select id=\"special-effect-select\">\n"
-      "                        <option value=\"0\">None</option>\n"
-      "                        <option value=\"1\">Negative</option>\n"
-      "                        <option value=\"2\">Grayscale</option>\n"
-      "                        <option value=\"3\">Red Tint</option>\n"
-      "                        <option value=\"4\">Green Tint</option>\n"
-      "                        <option value=\"5\">Blue Tint</option>\n"
-      "                        <option value=\"6\">Sepia</option>\n"
-      "                    </select>\n"
-      "                </div>\n"
-      "\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label>White Balance Mode:</label>\n"
-      "                    <select id=\"wb-mode-select\">\n"
-      "                        <option value=\"0\">Auto</option>\n"
-      "                        <option value=\"1\">Sunny</option>\n"
-      "                        <option value=\"2\">Cloudy</option>\n"
-      "                        <option value=\"3\">Office</option>\n"
-      "                        <option value=\"4\">Home</option>\n"
-      "                    </select>\n"
-      "                </div>\n"
-      "\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label>Image Options:</label>\n"
-      "                    <div class=\"toggle-control\">\n"
-      "                        <label>Horizontal Mirror</label>\n"
-      "                        <button class=\"toggle-switch off\" "
-      "id=\"hmirror-toggle\"></button>\n"
-      "                    </div>\n"
-      "                    <div class=\"toggle-control\">\n"
-      "                        <label>Vertical Flip</label>\n"
-      "                        <button class=\"toggle-switch off\" "
-      "id=\"vflip-toggle\"></button>\n"
-      "                    </div>\n"
-      "                </div>\n"
-      "\n"
-      "                <div class=\"control-group\">\n"
-      "                    <label>Flash Control:</label>\n"
-      "                    <div class=\"toggle-control\">\n"
-      "                        <label>Flash</label>\n"
-      "                        <button class=\"toggle-switch off\" "
-      "id=\"flash-toggle\"></button>\n"
-      "                    </div>\n"
-      "                </div>\n"
-      "\n"
-      "                <button id=\"reset-btn\" style=\"background: "
-      "linear-gradient(45deg, #f44336, #d32f2f); margin-bottom: 10px;\">Reset "
-      "to Defaults</button>\n"
-      "                <button id=\"capture-btn\">SNAPSHOT</button>\n"
-      "            </div>\n"
-      "\n"
-      "            <div class=\"payload-panel\">\n"
-      "                <h2>API Payload</h2>\n"
-      "                <div class=\"timestamp\" id=\"last-updated\">Last "
-      "updated: Never</div>\n"
-      "                <div class=\"payload-display\">\n"
-      "                    <pre id=\"payload-content\">{\n"
-      "  \"resolution\": \"VGA\",\n"
-      "  \"flash\": \"off\",\n"
-      "  \"brightness\": 0,\n"
-      "  \"contrast\": 2,\n"
-      "  \"exposure\": 300\n"
-      "}</pre>\n"
-      "                </div>\n"
-      "            </div>\n"
-      "        </div>\n"
-      "    </div>\n"
-      "\n"
-      "    <script>\n"
-      "        class ESP32CameraController {\n"
-      "            constructor() {\n"
-      "                // Use dynamic baseUrl from current page location\n"
-      "                this.baseUrl = window.location.protocol + '//' + "
-      "window.location.host;\n"
-      "                this.apiKey = null;\n"
-      "                this.isConnected = false;\n"
-      "                this.currentSettings = {\n"
-      "                    resolution: 'VGA',\n"
-      "                    quality: 10,\n"
-      "                    flash: 'off',\n"
-      "                    brightness: 0,\n"
-      "                    contrast: 2,\n"
-      "                    saturation: 1,\n"
-      "                    exposure: 300,\n"
-      "                    gain: 1,\n"
-      "                    special_effect: 0,\n"
-      "                    wb_mode: 0,\n"
-      "                    hmirror: false,\n"
-      "                    vflip: false\n"
-      "                };\n"
-      "                \n"
-      "                this.init();\n"
-      "            }\n"
-      "\n"
-      "            init() {\n"
-      "                this.bindEvents();\n"
-      "                this.updatePayloadDisplay();\n"
-      "                this.loadWiFiInfo();\n"
-      "            }\n"
-      "\n"
-      "            async loadAPIKey() {\n"
-      "                // Try to get API key from localStorage or prompt user\n"
-      "                const storedKey = "
-      "localStorage.getItem('esp32cam_api_key');\n"
-      "                if (storedKey) {\n"
-      "                    this.apiKey = storedKey;\n"
-      "                    console.log('API key loaded from localStorage');\n"
-      "                } else {\n"
-      "                    // Prompt user to enter API key (for first time "
-      "setup)\n"
-      "                    const userKey = prompt('Enter API key (check Serial "
-      "monitor for generated key):');\n"
-      "                    if (userKey && userKey.trim()) {\n"
-      "                        this.apiKey = userKey.trim();\n"
-      "                        localStorage.setItem('esp32cam_api_key', "
-      "this.apiKey);\n"
-      "                        console.log('API key saved to localStorage');\n"
-      "                    } else {\n"
-      "                        console.warn('No API key provided - requests "
-      "may fail');\n"
-      "                    }\n"
-      "                }\n"
-      "            }\n"
-      "\n"
-      "            getAuthHeaders() {\n"
-      "                return {\n"
-      "                    'Content-Type': 'application/json'\n"
-      "                };\n"
-      "            }\n"
-      "\n"
-      "            bindEvents() {\n"
-      "                // Resolution change\n"
-      "                "
-      "document.getElementById('resolution-select').addEventListener('change', "
-      "(e) => {\n"
-      "                    this.currentSettings.resolution = e.target.value;\n"
-      "                    this.updatePayloadDisplay();\n"
-      "                });\n"
-      "\n"
-      "                // Brightness control\n"
-      "                const brightnessSlider = "
-      "document.getElementById('brightness-slider');\n"
-      "                const brightnessValue = "
-      "document.getElementById('brightness-value');\n"
-      "                brightnessSlider.addEventListener('input', (e) => {\n"
-      "                    const value = parseInt(e.target.value);\n"
-      "                    this.currentSettings.brightness = value;\n"
-      "                    brightnessValue.textContent = value;\n"
-      "                    this.updateCameraSetting('brightness', value);\n"
-      "                    this.updatePayloadDisplay();\n"
-      "                });\n"
-      "\n"
-      "                // Contrast control\n"
-      "                const contrastSlider = "
-      "document.getElementById('contrast-slider');\n"
-      "                const contrastValue = "
-      "document.getElementById('contrast-value');\n"
-      "                contrastSlider.addEventListener('input', (e) => {\n"
-      "                    const value = parseInt(e.target.value);\n"
-      "                    this.currentSettings.contrast = value;\n"
-      "                    contrastValue.textContent = value;\n"
-      "                    this.updateCameraSetting('contrast', value);\n"
-      "                    this.updatePayloadDisplay();\n"
-      "                });\n"
-      "\n"
-      "                // Exposure control\n"
-      "                const exposureSlider = "
-      "document.getElementById('exposure-slider');\n"
-      "                const exposureValue = "
-      "document.getElementById('exposure-value');\n"
-      "                exposureSlider.addEventListener('input', (e) => {\n"
-      "                    const value = parseInt(e.target.value);\n"
-      "                    this.currentSettings.exposure = value;\n"
-      "                    exposureValue.textContent = value;\n"
-      "                    this.updateCameraSetting('exposure', value);\n"
-      "                    this.updatePayloadDisplay();\n"
-      "                });\n"
-      "\n"
-      "                // Saturation control\n"
-      "                const saturationSlider = "
-      "document.getElementById('saturation-slider');\n"
-      "                const saturationValue = "
-      "document.getElementById('saturation-value');\n"
-      "                saturationSlider.addEventListener('input', (e) => {\n"
-      "                    const value = parseInt(e.target.value);\n"
-      "                    this.currentSettings.saturation = value;\n"
-      "                    saturationValue.textContent = value;\n"
-      "                    this.updateCameraSetting('saturation', value);\n"
-      "                    this.updatePayloadDisplay();\n"
-      "                });\n"
-      "\n"
-      "                // Gain control\n"
-      "                const gainSlider = "
-      "document.getElementById('gain-slider');\n"
-      "                const gainValue = "
-      "document.getElementById('gain-value');\n"
-      "                gainSlider.addEventListener('input', (e) => {\n"
-      "                    const value = parseInt(e.target.value);\n"
-      "                    this.currentSettings.gain = value;\n"
-      "                    gainValue.textContent = value;\n"
-      "                    this.updateCameraSetting('gain', value);\n"
-      "                    this.updatePayloadDisplay();\n"
-      "                });\n"
-      "\n"
-      "                // Quality control\n"
-      "                const qualitySlider = "
-      "document.getElementById('quality-slider');\n"
-      "                const qualityValue = "
-      "document.getElementById('quality-value');\n"
-      "                qualitySlider.addEventListener('input', (e) => {\n"
-      "                    const value = parseInt(e.target.value);\n"
-      "                    this.currentSettings.quality = value;\n"
-      "                    qualityValue.textContent = value;\n"
-      "                    this.updatePayloadDisplay();\n"
-      "                });\n"
-      "\n"
-      "                // Special Effect control\n"
-      "                "
-      "document.getElementById('special-effect-select').addEventListener('"
-      "change', (e) => {\n"
-      "                    this.currentSettings.special_effect = "
-      "parseInt(e.target.value);\n"
-      "                    this.updatePayloadDisplay();\n"
-      "                });\n"
-      "\n"
-      "                // White Balance Mode control\n"
-      "                "
-      "document.getElementById('wb-mode-select').addEventListener('change', "
-      "(e) => {\n"
-      "                    this.currentSettings.wb_mode = "
-      "parseInt(e.target.value);\n"
-      "                    this.updatePayloadDisplay();\n"
-      "                });\n"
-      "\n"
-      "                // Toggle button controls\n"
-      "                "
-      "document.getElementById('flash-toggle').addEventListener('click', () => "
-      "{\n"
-      "                    this.toggleFlash();\n"
-      "                });\n"
-      "\n"
-      "                "
-      "document.getElementById('hmirror-toggle').addEventListener('click', () "
-      "=> {\n"
-      "                    this.toggleHMirror();\n"
-      "                });\n"
-      "\n"
-      "                "
-      "document.getElementById('vflip-toggle').addEventListener('click', () => "
-      "{\n"
-      "                    this.toggleVFlip();\n"
-      "                });\n"
-      "\n"
-      "                // Reset button\n"
-      "                "
-      "document.getElementById('reset-btn').addEventListener('click', () => {\n"
-      "                    this.resetToDefaults();\n"
-      "                });\n"
-      "\n"
-      "                // Capture button\n"
-      "                "
-      "document.getElementById('capture-btn').addEventListener('click', () => "
-      "{\n"
-      "                    this.takePhoto();\n"
-      "                });\n"
-      "\n"
-      "                // WiFi Config\n"
-      "                document.getElementById('wifi-toggle-pw').addEventListener("
-      "'click', () => {\n"
-      "                    const inp = document.getElementById("
-      "'wifi-pw-input');\n"
-      "                    if (inp.type === 'password') { inp.type = 'text'; }\n"
-      "                    else { inp.type = 'password'; }\n"
-      "                });\n"
-      "\n"
-      "                document.getElementById('wifi-apply-btn').addEventListener("
-      "'click', async () => {\n"
-      "                    const s = document.getElementById("
-      "'wifi-ssid-input').value.trim();\n"
-      "                    const p = document.getElementById("
-      "'wifi-pw-input').value;\n"
-      "                    const b = parseInt(document.getElementById("
-      "'wifi-bw-select').value);\n"
-      "                    const pl = {bandwidth: b};\n"
-      "                    if (s) pl.ssid = s;\n"
-      "                    if (p) pl.password = p;\n"
-      "                    const r = document.getElementById('wifi-result');\n"
-      "                    r.style.display = 'block';\n"
-      "                    r.textContent = 'Applying...';\n"
-      "                    r.style.background = '#2196f3';\n"
-      "                    try {\n"
-      "                        const res = await fetch('/wifi', {method:"
-      " 'POST', headers: this.getAuthHeaders(), body: JSON.stringify(pl)});\n"
-      "                        const d = await res.json();\n"
-      "                        if (d.status === 'success') {\n"
-      "                            r.style.background = '#4caf50';\n"
-      "                            r.textContent = d.message;\n"
-      "                            setTimeout(() => location.reload(), 2000);\n"
-      "                        } else {\n"
-      "                            r.style.background = '#f44336';\n"
-      "                            r.textContent = d.error || 'Error';\n"
-      "                        }\n"
-      "                    } catch (e) {\n"
-      "                        r.style.background = '#FFA500';\n"
-      "                        r.textContent = 'Settings applied! Device reconnecting... Reloading page in 5 seconds...';\n"
-      "                        setTimeout(() => location.reload(), 5000);\n"
-      "                    }\n"
-      "                });\n"
-      "            }\n"
-      "\n"
-      "            async updateCameraSetting(setting, value) {\n"
-      "                // Camera settings are applied in real-time through the "
-      "stream\n"
-      "                console.log(`${setting} updated to ${value}`);\n"
-      "            }\n"
-      "\n"
-      "            toggleFlash() {\n"
-      "                const isOn = this.currentSettings.flash === 'on';\n"
-      "                this.currentSettings.flash = isOn ? 'off' : 'on';\n"
-      "                this.updateToggleButton('flash-toggle', 'flash-text', "
-      "'Flash', !isOn);\n"
-      "                this.updatePayloadDisplay();\n"
-      "            }\n"
-      "\n"
-      "            toggleHMirror() {\n"
-      "                this.currentSettings.hmirror = "
-      "!this.currentSettings.hmirror;\n"
-      "                this.updateToggleButton('hmirror-toggle', "
-      "'hmirror-text', 'Horizontal Mirror', this.currentSettings.hmirror);\n"
-      "                this.updatePayloadDisplay();\n"
-      "            }\n"
-      "\n"
-      "            toggleVFlip() {\n"
-      "                this.currentSettings.vflip = "
-      "!this.currentSettings.vflip;\n"
-      "                this.updateToggleButton('vflip-toggle', 'vflip-text', "
-      "'Vertical Flip', this.currentSettings.vflip);\n"
-      "                this.updatePayloadDisplay();\n"
-      "            }\n"
-      "\n"
-      "            updateToggleButton(buttonId, textId, label, isOn) {\n"
-      "                const button = document.getElementById(buttonId);\n"
-      "                button.className = `toggle-switch ${isOn ? 'on' : "
-      "'off'}`;\n"
-      "            }\n"
-      "\n"
-      "            resetToDefaults() {\n"
-      "                // Reset all settings to default values\n"
-      "                this.currentSettings = {\n"
-      "                    resolution: 'VGA',\n"
-      "                    quality: 10,\n"
-      "                    flash: 'off',\n"
-      "                    brightness: 0,\n"
-      "                    contrast: 2,\n"
-      "                    saturation: 1,\n"
-      "                    exposure: 300,\n"
-      "                    gain: 1,\n"
-      "                    special_effect: 0,\n"
-      "                    wb_mode: 0,\n"
-      "                    hmirror: false,\n"
-      "                    vflip: false\n"
-      "                };\n"
-      "\n"
-      "                // Update all UI elements\n"
-      "                document.getElementById('resolution-select').value = "
-      "'VGA';\n"
-      "                \n"
-      "                // Reset sliders\n"
-      "                document.getElementById('brightness-slider').value = "
-      "0;\n"
-      "                document.getElementById('brightness-value').textContent "
-      "= '0';\n"
-      "                document.getElementById('contrast-slider').value = 2;\n"
-      "                document.getElementById('contrast-value').textContent = "
-      "'2';\n"
-      "                document.getElementById('saturation-slider').value = "
-      "1;\n"
-      "                document.getElementById('saturation-value').textContent "
-      "= '1';\n"
-      "                document.getElementById('exposure-slider').value = "
-      "300;\n"
-      "                document.getElementById('exposure-value').textContent = "
-      "'300';\n"
-      "                document.getElementById('gain-slider').value = 1;\n"
-      "                document.getElementById('gain-value').textContent = "
-      "'1';\n"
-      "                document.getElementById('quality-slider').value = 10;\n"
-      "                document.getElementById('quality-value').textContent = "
-      "'10';\n"
-      "                \n"
-      "                // Reset select dropdowns\n"
-      "                document.getElementById('special-effect-select').value "
-      "= '0';\n"
-      "                document.getElementById('wb-mode-select').value = '0';\n"
-      "                \n"
-      "                // Reset toggle switches\n"
-      "                this.updateToggleButton('flash-toggle', null, 'Flash', "
-      "false);\n"
-      "                this.updateToggleButton('hmirror-toggle', null, "
-      "'Horizontal Mirror', false);\n"
-      "                this.updateToggleButton('vflip-toggle', null, 'Vertical "
-      "Flip', false);\n"
-      "                \n"
-      "                // Update payload display\n"
-      "                this.updatePayloadDisplay();\n"
-      "                \n"
-      "                console.log('Settings reset to defaults');\n"
-      "            }\n"
-      "\n"
-      "            async takePhoto() {\n"
-      "                const { resolution, quality, flash, brightness, contrast, "
-      "saturation, exposure, gain, special_effect, wb_mode, hmirror, vflip } = "
-      "this.currentSettings;\n"
-      "                \n"
-      "                // Use POST /snapshot with flat structure (not nested)\n"
-      "                const url = `${this.baseUrl}/snapshot`;\n"
-      "                const payload = {\n"
-      "                    resolution: resolution,\n"
-      "                    quality: parseInt(quality),\n"
-      "                    flash: flash === 'on',\n"
-      "                    brightness: brightness,\n"
-      "                    contrast: contrast,\n"
-      "                    saturation: saturation,\n"
-      "                    exposure: exposure,\n"
-      "                    gain: gain,\n"
-      "                    special_effect: special_effect,\n"
-      "                    wb_mode: wb_mode,\n"
-      "                    hmirror: hmirror,\n"
-      "                    vflip: vflip\n"
-      "                };\n"
-      "                \n"
-      "                // Update UI to show capturing state\n"
-      "                const captureBtn = "
-      "document.getElementById('capture-btn');\n"
-      "                const spinnerOverlay = "
-      "document.getElementById('spinner-overlay');\n"
-      "                const originalText = captureBtn.textContent;\n"
-      "                captureBtn.textContent = 'Capturing...';\n"
-      "                captureBtn.disabled = true;\n"
-      "                spinnerOverlay.style.display = 'flex';\n"
-      "                \n"
-      "                try {\n"
-      "                    const response = await fetch(url, {\n"
-      "                        method: 'POST',\n"
-      "                        headers: this.getAuthHeaders(),\n"
-      "                        body: JSON.stringify(payload)\n"
-      "                    });\n"
-      "                    \n"
-      "                    if (response.ok) {\n"
-      "                        const blob = await response.blob();\n"
-      "                        const imageUrl = URL.createObjectURL(blob);\n"
-      "                        \n"
-      "                        // Display the captured image\n"
-      "                        const imageDisplay = "
-      "document.getElementById('camera-display');\n"
-      "                        const placeholder = "
-      "document.getElementById('camera-placeholder');\n"
-      "                        const overlay = "
-      "document.querySelector('.photo-overlay');\n"
-      "                        \n"
-      "                        imageDisplay.src = imageUrl;\n"
-      "                        imageDisplay.style.display = 'block';\n"
-      "                        placeholder.style.display = 'none';\n"
-      "                        overlay.style.display = 'block';\n"
-      "                        \n"
-      "                        "
-      "document.getElementById('connection-status').className = "
-      "'status-indicator status-connected';\n"
-      "                        "
-      "document.getElementById('photo-status').textContent = 'Photo "
-      "captured';\n"
-      "                        \n"
-      "                        console.log('Photo captured successfully');\n"
-      "                        this.updatePayloadDisplay();\n"
-      "                        \n"
-      "                        // Update connection status\n"
-      "                        if (!this.isConnected) {\n"
-      "                            this.isConnected = true;\n"
-      "                        }\n"
-      "                    } else {\n"
-      "                        const errorData = await response.json();\n"
-      "                        throw new Error(errorData.error || 'Failed to capture photo');\n"
-      "                    }\n"
-      "                } catch (error) {\n"
-      "                    console.error('Failed to capture photo:', error);\n"
-      "                    const overlay = "
-      "document.querySelector('.photo-overlay');\n"
-      "                    overlay.style.display = 'block';\n"
-      "                    "
-      "document.getElementById('connection-status').className = "
-      "'status-indicator status-disconnected';\n"
-      "                    document.getElementById('photo-status').textContent "
-      "= 'ERROR: ' + error.message;\n"
-      "                    this.isConnected = false;\n"
-      "                } finally {\n"
-      "                    captureBtn.textContent = originalText;\n"
-      "                    captureBtn.disabled = false;\n"
-      "                    spinnerOverlay.style.display = 'none';\n"
-      "                }\n"
-      "            }\n"
-      "\n"
-      "\n"
-      "            async loadWiFiInfo() {\n"
-      "                try {\n"
-      "                    const headers = {};\n"
-      "                    if (this.apiKey) {\n"
-      "                        headers['Authorization'] = 'Bearer ' + "
-      "this.apiKey;\n"
-      "                    }\n"
-      "                    const response = await "
-      "fetch(`${this.baseUrl}/status`, {\n"
-      "                        headers: headers\n"
-      "                    });\n"
-      "                    if (response.ok) {\n"
-      "                        const data = await response.json();\n"
-      "                        \n"
-      "                        // Update WiFi information\n"
-      "                        "
-      "document.getElementById('wifi-ssid').textContent = data.wifi.ssid;\n"
-      "                        document.getElementById('wifi-ip').textContent "
-      "= data.wifi.ip;\n"
-      "                        "
-      "document.getElementById('wifi-mode').textContent = data.wifi.mode;\n"
-      "                        "
-      "document.getElementById('wifi-gateway').textContent = "
-      "data.wifi.gateway;\n"
-      "                        document.getElementById('wifi-mac').textContent "
-      "= data.wifi.mac;\n"
-      "                        "
-      "document.getElementById('wifi-protocol').textContent = "
-      "data.wifi.protocol || 'Unknown';\n"
-      "                        "
-      "document.getElementById('wifi-speed').textContent = data.wifi.speed || "
-      "'Unknown';\n"
-      "                        "
-      "document.getElementById('wifi-bandwidth').textContent = "
-      "data.wifi.bandwidth || 'Unknown';\n"
-      "                        "
-      "document.getElementById('wifi-txpower').textContent = "
-      "data.wifi.tx_power || 'Unknown';\n"
-      "                        \n"
-      "                        // Update signal strength with visual "
-      "indicator\n"
-      "                        const rssi = data.wifi.rssi;\n"
-      "                        const signalPercentage = "
-      "data.wifi.signal_percentage || 0;\n"
-      "                        let signalQuality = 'Poor';\n"
-      "                        if (rssi > -50) signalQuality = 'Excellent';\n"
-      "                        else if (rssi > -60) signalQuality = 'Good';\n"
-      "                        else if (rssi > -70) signalQuality = 'Fair';\n"
-      "                        "
-      "document.getElementById('wifi-signal').textContent = `${rssi} dBm "
-      "(${signalPercentage}% - ${signalQuality})`;\n"
-      "                        \n"
-      "                        // Update connection status\n"
-      "                        const statusIndicator = "
-      "document.getElementById('wifi-status-indicator');\n"
-      "                        const statusText = "
-      "document.getElementById('wifi-status-text');\n"
-      "                        if (data.wifi.connected) {\n"
-      "                            statusIndicator.className = "
-      "'status-indicator status-connected';\n"
-      "                            statusText.textContent = 'Connected';\n"
-      "                        } else {\n"
-      "                            statusIndicator.className = "
-      "'status-indicator status-disconnected';\n"
-      "                            statusText.textContent = 'Disconnected';\n"
-      "                        }\n"
-      "                    }\n"
-      "                } catch (error) {\n"
-      "                    console.error('Failed to load WiFi info:', error);\n"
-      "                    "
-      "document.getElementById('wifi-status-text').textContent = 'Error "
-      "loading WiFi info';\n"
-      "                }\n"
-      "            }\n"
-      "\n"
-      "            updatePayloadDisplay() {\n"
-      "                const payloadContent = "
-      "document.getElementById('payload-content');\n"
-      "                const lastUpdated = "
-      "document.getElementById('last-updated');\n"
-      "                \n"
-      "                const payload = {\n"
-      "                    resolution: this.currentSettings.resolution,\n"
-      "                    quality: this.currentSettings.quality,\n"
-      "                    flash: this.currentSettings.flash,\n"
-      "                    brightness: this.currentSettings.brightness,\n"
-      "                    contrast: this.currentSettings.contrast,\n"
-      "                    saturation: this.currentSettings.saturation,\n"
-      "                    exposure: this.currentSettings.exposure,\n"
-      "                    gain: this.currentSettings.gain,\n"
-      "                    special_effect: "
-      "this.currentSettings.special_effect,\n"
-      "                    wb_mode: this.currentSettings.wb_mode,\n"
-      "                    hmirror: this.currentSettings.hmirror,\n"
-      "                    vflip: this.currentSettings.vflip,\n"
-      "                    timestamp: new Date().toISOString(),\n"
-      "                    api_endpoint: `${this.baseUrl}/snapshot`,\n"
-      "                    method: 'POST',\n"
-      "                    content_type: 'application/json'\n"
-      "                };\n"
-      "                \n"
-      "                payloadContent.textContent = JSON.stringify(payload, "
-      "null, 2);\n"
-      "                lastUpdated.textContent = `Last updated: ${new "
-      "Date().toLocaleTimeString()}`;\n"
-      "            }\n"
-      "        }\n"
-      "\n"
-      "        // Initialize the controller when the page loads\n"
-      "        document.addEventListener('DOMContentLoaded', () => {\n"
-      "            new ESP32CameraController();\n"
-      "        });\n"
-      "    </script>\n"
-      "</body>\n"
-      "</html>";
-
-  // Copy HTML content to output buffer with size limit
-  strncpy(output, html_content, max_len - 1);
-  output[max_len - 1] = '\0';
 }

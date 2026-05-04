@@ -9,8 +9,8 @@
 
 // EEPROM Memory Layout
 #define EEPROM_SIZE 512
-#define CONFIG_MAGIC 0xFFFF
-#define CONFIG_VERSION 6
+#define CONFIG_MAGIC 0xCA37
+#define CONFIG_VERSION 10
 
 // Memory offsets
 #define OFFSET_MAGIC 0
@@ -48,7 +48,7 @@
 #define DEFAULT_API_KEY "esp32cam-default-key"
 #define DEFAULT_DEVICE_NAME "ESP32-CAM-Server"
 #define DEFAULT_JPEG_QUALITY 10
-#define DEFAULT_RESOLUTION FRAMESIZE_VGA
+#define DEFAULT_RESOLUTION FRAMESIZE_UXGA
 #define DEFAULT_FLASH_THRESHOLD 100
 
 struct Configuration {
@@ -132,6 +132,7 @@ private:
   uint16_t readUint16(int offset);
   void writeIPAddress(int offset, const IPAddress &addr);
   IPAddress readIPAddress(int offset);
+  bool applyLegacyDefaultUpdates(bool force_default_wifi_profile);
   bool validateConfiguration() const;
 };
 

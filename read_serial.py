@@ -17,8 +17,9 @@ try:
     ser.setRTS(False)
     ser.setDTR(False)
     
-    print("Reading serial for 15 seconds...")
-    end_time = time.time() + 15
+    read_seconds = int(sys.argv[1]) if len(sys.argv) > 1 else 15
+    print(f"Reading serial for {read_seconds} seconds...")
+    end_time = time.time() + read_seconds
     while time.time() < end_time:
         line = ser.readline()
         if line:

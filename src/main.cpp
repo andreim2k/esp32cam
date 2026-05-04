@@ -22,6 +22,7 @@
 #include "modules/config.h"
 #include "modules/flash.h"
 #include "modules/webserver.h"
+#include <ArduinoOTA.h>
 #include <WiFi.h>
 
 // ===================
@@ -116,22 +117,71 @@ void checkMemoryUsage() {
  */
 void applyWiFiBandwidthMode() {
   uint8_t bwMode = configManager.getWiFiBandwidthMode();
-  esp_wifi_set_max_tx_power(78);
+  esp_err_t err = esp_wifi_set_max_tx_power(78);
+  if (err != ESP_OK) {
+    Serial.printf("Failed to set WiFi max TX power: 0x%x\n", err);
+  }
+
   switch (bwMode) {
     case WIFI_BW_MODE_HT20:
-      esp_wifi_set_protocol(WIFI_IF_STA,
+      err = esp_wifi_set_protocol(WIFI_IF_STA,
           WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-      esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
+      if (err != ESP_OK) {
+        Serial.printf("Failed to set WiFi protocol: 0x%x\n", err);
+      }
+      err = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
+      if (err != ESP_OK) {
+        Serial.printf("Failed to set WiFi bandwidth HT20: 0x%x\n", err);
+      }
+      Serial.println("WiFi bandwidth mode: HT20");
       break;
     case WIFI_BW_MODE_HT40:
-      esp_wifi_set_protocol(WIFI_IF_STA,
+      err = esp_wifi_set_protocol(WIFI_IF_STA,
           WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-      esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT40);
+      if (err != ESP_OK) {
+        Serial.printf("Failed to set WiFi protocol: 0x%x\n", err);
+      }
+      err = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT40);
+      if (err != ESP_OK) {
+        Serial.printf("Failed to set WiFi bandwidth HT40: 0x%x\n", err);
+      }
+      Serial.println("WiFi bandwidth mode: HT40");
       break;
     default: // WIFI_BW_MODE_11B
-      esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B);
+      err = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B);
+      if (err != ESP_OK) {
+        Serial.printf("Failed to set WiFi protocol 11b: 0x%x\n", err);
+      }
+      Serial.println("WiFi bandwidth mode: 802.11b long-range");
       break;
   }
+}
+
+/**
+ * Print visible WiFi networks when association fails.
+ */
+void printWiFiScanDiagnostics() {
+  Serial.println("Scanning visible WiFi networks...");
+  WiFi.disconnect(false, false);
+  delay(500);
+  WiFi.mode(WIFI_STA);
+  delay(100);
+
+  int network_count = WiFi.scanNetworks(false, true);
+
+  if (network_count < 0) {
+    Serial.printf("WiFi scan failed: %d\n", network_count);
+    return;
+  }
+
+  Serial.printf("WiFi scan found %d network(s)\n", network_count);
+  for (int i = 0; i < network_count; i++) {
+    Serial.printf("  %d: SSID='%s', RSSI=%d dBm, Channel=%d, Encryption=%d\n",
+                  i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i),
+                  WiFi.channel(i), WiFi.encryptionType(i));
+  }
+
+  WiFi.scanDelete();
 }
 
 /**
@@ -146,8 +196,8 @@ void checkWiFiConnection() {
       // Attempt reconnection
       WiFi.disconnect();
       delay(1000);
-      WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
       applyWiFiBandwidthMode();
+      WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
 
       // Wait for connection with timeout
       int attempts = 0;
@@ -163,6 +213,10 @@ void checkWiFiConnection() {
         char ip_str[16];
         WiFi.localIP().toString().toCharArray(ip_str, sizeof(ip_str));
         Serial.printf("IP Address: %s\n", ip_str);
+        webServerManager.stop();
+        delay(100);
+        webServerManager.begin();
+        Serial.println("HTTP server restarted after WiFi reconnect");
       } else {
         Serial.println();
         Serial.println("WiFi reconnection failed");
@@ -201,6 +255,46 @@ void emergencyRecovery() {
 }
 
 // ===================
+// OTA UPDATE
+// ===================
+
+void initOTA() {
+  ArduinoOTA.setHostname(configManager.getDeviceName());
+
+  ArduinoOTA.onStart([]() {
+    String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
+    Serial.printf("OTA Start: updating %s\n", type.c_str());
+    webServerManager.stop(); // free TCP socket during upload
+  });
+
+  ArduinoOTA.onEnd([]() {
+    Serial.println("OTA complete");
+  });
+
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    esp_task_wdt_reset(); // keep watchdog alive during long upload
+    Serial.printf("OTA: %u%%\r", progress / (total / 100));
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) {
+    const char* msg = "unknown";
+    if      (error == OTA_AUTH_ERROR)    msg = "auth failed";
+    else if (error == OTA_BEGIN_ERROR)   msg = "begin failed";
+    else if (error == OTA_CONNECT_ERROR) msg = "connect failed";
+    else if (error == OTA_RECEIVE_ERROR) msg = "receive failed";
+    else if (error == OTA_END_ERROR)     msg = "end failed";
+    Serial.printf("OTA Error: %s\n", msg);
+    webServerManager.begin(); // restore server after failed OTA
+  });
+
+  ArduinoOTA.begin();
+  char ip_str[16];
+  WiFi.localIP().toString().toCharArray(ip_str, sizeof(ip_str));
+  Serial.printf("OTA ready — hostname: %s, IP: %s, port: 3232\n",
+                configManager.getDeviceName(), ip_str);
+}
+
+// ===================
 // WIFI MANAGEMENT
 // ===================
 
@@ -210,6 +304,11 @@ void emergencyRecovery() {
 void initWiFi() {
   Serial.println("========== WiFi Configuration ==========");
   Serial.printf("SSID: %s\n", configManager.getWiFiSSID());
+
+  WiFi.disconnect(true, true);
+  delay(200);
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
 
   // Configure IP settings
   if (configManager.useStaticIP()) {
@@ -241,23 +340,21 @@ void initWiFi() {
     Serial.println("Using DHCP (automatic IP assignment)");
   }
 
-  Serial.println("Connecting to WiFi...");
-  // Connect using saved SSID/password from EEPROM
-  WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
-  WiFi.setSleep(false);
-
-  // MAXIMUM POWER CONFIGURATION FOR LONG DISTANCE
+  // Maximum power plus 802.11b is the default long-range/lowest-speed profile.
   WiFi.setTxPower(WIFI_POWER_19_5dBm); // Absolute maximum power: 19.5 dBm
   Serial.println("WiFi transmission power set to MAXIMUM (19.5 dBm)");
 
   // Aggressive power and range optimizations
   WiFi.setAutoReconnect(true); // Enable automatic reconnection
-  WiFi.persistent(true); // Store WiFi config in flash for faster reconnects
+  WiFi.persistent(false); // Use EEPROM as authoritative store; don't write NVS
 
-  // Apply WiFi bandwidth mode from configuration
+  // Apply WiFi bandwidth mode BEFORE WiFi.begin()
   applyWiFiBandwidthMode();
-
   Serial.println("WiFi bandwidth mode applied from configuration");
+
+  Serial.println("Connecting to WiFi...");
+  // Connect using saved SSID/password from EEPROM
+  WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
 
   // Non-blocking connection with watchdog resets
   int attempts = 0;
@@ -312,6 +409,7 @@ void initWiFi() {
     Serial.println("ERROR: WiFi connection failed!");
     Serial.printf("Check your WiFi network (%s) and password.\n", configManager.getWiFiSSID());
     Serial.printf("Final WiFi status: %d\n", WiFi.status());
+    printWiFiScanDiagnostics();
     Serial.println("Device will continue but network features won't work.");
   }
 }
@@ -364,6 +462,11 @@ void setup() {
   if (!webServerManager.begin()) {
     Serial.println("ERROR: Failed to start web server");
     return;
+  }
+
+  // Start OTA update service (requires WiFi to be up)
+  if (WiFi.status() == WL_CONNECTED) {
+    initOTA();
   }
 
   // Print available endpoints and network information
@@ -423,9 +526,16 @@ void loop() {
     Serial.printf("Using saved credentials - SSID: %s\n", configManager.getWiFiSSID());
     WiFi.disconnect();
     delay(500);
-    WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
     applyWiFiBandwidthMode();
+    WiFi.begin(configManager.getWiFiSSID(), configManager.getWiFiPassword());
+    webServerManager.stop();
+    delay(100);
+    webServerManager.begin();
+    Serial.println("HTTP server restarted after WiFi reconnect");
   }
+
+  // Handle OTA update requests
+  ArduinoOTA.handle();
 
   // Handle incoming HTTP requests using the web server manager
   webServerManager.handleClients();

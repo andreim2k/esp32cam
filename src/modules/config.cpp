@@ -22,6 +22,44 @@ bool ConfigManager::loadConfig() {
   uint16_t magic = readUint16(OFFSET_MAGIC);
   uint16_t version = readUint16(OFFSET_VERSION);
 
+  // Migrate from old CONFIG_MAGIC 0xFFFF to the current layout.
+  if (magic == 0xFFFF && version == 6) {
+    Serial.printf("Migrating config from old CONFIG_MAGIC 0xFFFF (v6) to v%d...\n",
+                  CONFIG_VERSION);
+    readString(OFFSET_WIFI_SSID, config.wifi_ssid, SSID_MAX_LEN);
+    readString(OFFSET_WIFI_PASSWORD, config.wifi_password, PASSWORD_MAX_LEN);
+    readString(OFFSET_API_KEY, config.api_key, API_KEY_MAX_LEN);
+    readString(OFFSET_DEVICE_NAME, config.device_name, DEVICE_NAME_MAX_LEN);
+
+    config.use_static_ip = readUint8(OFFSET_USE_STATIC_IP);
+    config.static_ip = readIPAddress(OFFSET_STATIC_IP);
+    config.gateway = readIPAddress(OFFSET_GATEWAY);
+    config.subnet = readIPAddress(OFFSET_SUBNET);
+    config.dns_primary = readIPAddress(OFFSET_DNS_PRIMARY);
+    config.dns_secondary = readIPAddress(OFFSET_DNS_SECONDARY);
+
+    config.jpeg_quality = readUint8(OFFSET_JPEG_QUALITY);
+    config.default_resolution = (framesize_t)readUint8(OFFSET_DEFAULT_RESOLUTION);
+    config.flash_threshold = readUint8(OFFSET_FLASH_THRESHOLD);
+    config.wifi_bandwidth = readUint8(OFFSET_WIFI_BANDWIDTH);
+
+    applyLegacyDefaultUpdates(true);
+
+    if (!validateConfiguration()) {
+      Serial.println("Migrated configuration validation failed, using defaults");
+      resetToDefaults();
+      return saveConfig();
+    }
+
+    config_loaded = true;
+    if (!saveConfig()) {
+      Serial.println("Failed to persist migrated configuration");
+      return false;
+    }
+    Serial.println("Config migration successful");
+    return true;
+  }
+
   // Migrate any older config layout that still shares the same core fields.
   if (magic == CONFIG_MAGIC && version > 0 && version < CONFIG_VERSION) {
     Serial.printf("Migrating config from v%d to v%d...\n", version,
@@ -49,6 +87,8 @@ bool ConfigManager::loadConfig() {
       config.wifi_bandwidth = DEFAULT_WIFI_BANDWIDTH;
     }
 
+    applyLegacyDefaultUpdates(true);
+
     if (!validateConfiguration()) {
       Serial.println("Migrated configuration validation failed, using defaults");
       resetToDefaults();
@@ -60,7 +100,7 @@ bool ConfigManager::loadConfig() {
       Serial.println("Failed to persist migrated configuration");
       return false;
     }
-    Serial.println("Config migration successful - credentials preserved");
+    Serial.println("Config migration successful");
     return true;
   }
 
@@ -89,6 +129,8 @@ bool ConfigManager::loadConfig() {
   config.flash_threshold = readUint8(OFFSET_FLASH_THRESHOLD);
   config.wifi_bandwidth = readUint8(OFFSET_WIFI_BANDWIDTH);
 
+  bool config_updated = applyLegacyDefaultUpdates(false);
+
   if (!validateConfiguration()) {
     Serial.println("Configuration validation failed, using defaults");
     resetToDefaults();
@@ -96,6 +138,11 @@ bool ConfigManager::loadConfig() {
   }
 
   config_loaded = true;
+  if (config_updated && !saveConfig()) {
+    Serial.println("Failed to persist updated default configuration");
+    return false;
+  }
+
   Serial.println("Configuration loaded successfully");
   Serial.printf("WiFi SSID: %s\n", config.wifi_ssid);
   Serial.printf("Device Name: %s\n", config.device_name);
@@ -152,8 +199,8 @@ void ConfigManager::resetToDefaults() {
 
   strncpy(config.device_name, DEFAULT_DEVICE_NAME, DEVICE_NAME_MAX_LEN - 1);
 
-  // Default to DHCP
-  config.use_static_ip = false;
+  // Default to fixed LAN address.
+  config.use_static_ip = true;
   config.static_ip = IPAddress(192, 168, 50, 3);
   config.gateway = IPAddress(192, 168, 50, 1);
   config.subnet = IPAddress(255, 255, 255, 0);
@@ -170,6 +217,52 @@ void ConfigManager::resetToDefaults() {
   config.wifi_password[PASSWORD_MAX_LEN - 1] = '\0';
   config.api_key[API_KEY_MAX_LEN - 1] = '\0';
   config.device_name[DEVICE_NAME_MAX_LEN - 1] = '\0';
+}
+
+bool ConfigManager::applyLegacyDefaultUpdates(bool force_default_wifi_profile) {
+  bool changed = false;
+  bool using_default_network = strcmp(config.wifi_ssid, DEFAULT_SSID) == 0;
+
+  if (strcmp(config.wifi_ssid, "MNZ-TM") == 0 ||
+      strcmp(config.wifi_ssid, "MNZ_IoT") == 0) {
+    Serial.printf("Updating stored WiFi SSID from legacy default to %s\n",
+                  DEFAULT_SSID);
+    strncpy(config.wifi_ssid, DEFAULT_SSID, SSID_MAX_LEN - 1);
+    strncpy(config.wifi_password, DEFAULT_PASSWORD, PASSWORD_MAX_LEN - 1);
+    config.wifi_ssid[SSID_MAX_LEN - 1] = '\0';
+    config.wifi_password[PASSWORD_MAX_LEN - 1] = '\0';
+    using_default_network = true;
+    changed = true;
+  }
+
+  if (changed && config.default_resolution == FRAMESIZE_VGA) {
+    Serial.println("Updating stored default resolution to PSRAM-backed UXGA");
+    config.default_resolution = DEFAULT_RESOLUTION;
+  }
+
+  if (force_default_wifi_profile && using_default_network &&
+      config.wifi_bandwidth != DEFAULT_WIFI_BANDWIDTH) {
+    Serial.println("Updating stored WiFi bandwidth mode to 802.11b long-range");
+    config.wifi_bandwidth = DEFAULT_WIFI_BANDWIDTH;
+    changed = true;
+  }
+
+  if (!config.use_static_ip ||
+      config.static_ip != IPAddress(192, 168, 50, 3) ||
+      config.gateway != IPAddress(192, 168, 50, 1) ||
+      config.subnet != IPAddress(255, 255, 255, 0) ||
+      config.dns_primary != IPAddress(192, 168, 50, 1)) {
+    Serial.println("Forcing persistent static IP configuration: 192.168.50.3");
+    config.use_static_ip = true;
+    config.static_ip = IPAddress(192, 168, 50, 3);
+    config.gateway = IPAddress(192, 168, 50, 1);
+    config.subnet = IPAddress(255, 255, 255, 0);
+    config.dns_primary = IPAddress(192, 168, 50, 1);
+    config.dns_secondary = IPAddress(8, 8, 8, 8);
+    changed = true;
+  }
+
+  return changed;
 }
 
 // Setters

@@ -1,16 +1,18 @@
 #include "camera.h"
+#include "esp_heap_caps.h"
+#include "soc/soc_memory_types.h"
 
 // Global instance
 CameraManager cameraManager;
 
-CameraManager::CameraManager() : 
+CameraManager::CameraManager() :
   camera_ready(false),
   current_resolution(FRAMESIZE_UXGA),
-  original_resolution(FRAMESIZE_UXGA),
   capture_count(0),
   failed_capture_count(0),
   last_capture_time(0),
   last_frame_size(0),
+  frame_buffers_in_psram(false),
   frame_buffer_active(false) {
   
   // Initialize default settings
@@ -42,9 +44,8 @@ bool CameraManager::begin(uint8_t jpeg_quality, framesize_t default_resolution) 
     }
     
     if (configureCamera(jpeg_quality, safe_resolution)) {
+      current_resolution = safe_resolution;
       if (initializeCameraSensor()) {
-        current_resolution = safe_resolution;
-        original_resolution = safe_resolution;
         camera_ready = true;
         
         Serial.println("Camera initialization complete");
@@ -65,6 +66,7 @@ bool CameraManager::begin(uint8_t jpeg_quality, framesize_t default_resolution) 
 
 bool CameraManager::configureCamera(uint8_t jpeg_quality, framesize_t resolution) {
   framesize_t safe_resolution = getSafeFrameSize(resolution);
+  bool psram_available = psramFound();
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -87,16 +89,17 @@ bool CameraManager::configureCamera(uint8_t jpeg_quality, framesize_t resolution
   config.xclk_freq_hz = 20000000;
   config.frame_size = safe_resolution;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.grab_mode = CAMERA_GRAB_LATEST;
-  config.fb_location = CAMERA_FB_IN_PSRAM;
+  config.grab_mode = psram_available ? CAMERA_GRAB_LATEST : CAMERA_GRAB_WHEN_EMPTY;
+  config.fb_location = psram_available ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
   config.jpeg_quality = jpeg_quality;
-  config.fb_count = 2; // Double buffering
+  config.fb_count = psram_available ? 2 : 1;
 
-  // If PSRAM IC present, init with UXGA resolution and higher JPEG quality
+  // If PSRAM IC is present, keep high-resolution JPEG frame buffers in PSRAM.
   if(config.pixel_format == PIXFORMAT_JPEG){
-    if(psramFound()){
+    if(psram_available){
       config.jpeg_quality = jpeg_quality;
       config.fb_count = 2;
+      config.fb_location = CAMERA_FB_IN_PSRAM;
       config.grab_mode = CAMERA_GRAB_LATEST;
     } else {
       // Limit the frame size when PSRAM is not available
@@ -113,13 +116,22 @@ bool CameraManager::configureCamera(uint8_t jpeg_quality, framesize_t resolution
 #endif
   }
 
+  bool using_psram_buffers = psram_available &&
+                             config.fb_location == CAMERA_FB_IN_PSRAM;
+  Serial.printf("PSRAM Available: %s\n", psram_available ? "Yes" : "No");
+  Serial.printf("Frame buffer location: %s\n",
+                using_psram_buffers ? "PSRAM" : "DRAM");
+  Serial.printf("Frame buffer count: %d\n", config.fb_count);
+
   // Camera init
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x\n", err);
+    frame_buffers_in_psram = false;
     return false;
   }
 
+  frame_buffers_in_psram = using_psram_buffers;
   return true;
 }
 
@@ -222,8 +234,16 @@ bool CameraManager::setResolution(framesize_t resolution) {
     Serial.printf("Failed to set resolution to %d\n", safe_resolution);
     return false;
   }
-  
+
   current_resolution = safe_resolution;
+
+  // The OV2640 buffers the previous frame; discard 2 frames to flush the
+  // pipeline so the next captureFrame() returns a frame at the new resolution.
+  for (int i = 0; i < 2; i++) {
+    camera_fb_t* stale = esp_camera_fb_get();
+    if (stale) esp_camera_fb_return(stale);
+  }
+
   char resolution_str[32];
   getResolutionString(safe_resolution, resolution_str, sizeof(resolution_str));
   Serial.printf("Resolution changed to: %s\n", resolution_str);
@@ -250,6 +270,9 @@ camera_fb_t* CameraManager::captureFrame() {
   camera_fb_t* fb = esp_camera_fb_get();
   
   if (fb) {
+    if (frame_buffers_in_psram && !esp_ptr_external_ram(fb->buf)) {
+      Serial.println("WARNING: Expected camera frame buffer in PSRAM, but buffer is not external RAM");
+    }
     frame_buffer_active = true;
     capture_count++;
     last_capture_time = millis();
@@ -284,6 +307,9 @@ camera_fb_t* CameraManager::captureWithFlash(bool use_flash) {
   camera_fb_t* fb = esp_camera_fb_get();
   
   if (fb) {
+    if (frame_buffers_in_psram && !esp_ptr_external_ram(fb->buf)) {
+      Serial.println("WARNING: Expected camera frame buffer in PSRAM, but buffer is not external RAM");
+    }
     frame_buffer_active = true;
     capture_count++;
     last_capture_time = millis();
@@ -305,8 +331,11 @@ CaptureResult CameraManager::captureToBuffer(uint8_t** buffer, size_t* buffer_si
     return CAPTURE_FAILED;
   }
   
-  // Allocate buffer and copy data
-  *buffer = (uint8_t*)malloc(fb->len);
+  // Allocate copied captures in PSRAM when available.
+  *buffer = psramFound() ? (uint8_t*)ps_malloc(fb->len) : nullptr;
+  if (!*buffer) {
+    *buffer = (uint8_t*)malloc(fb->len);
+  }
   if (!*buffer) {
     releaseFrameBuffer(fb);
     return CAPTURE_OUT_OF_MEMORY;
@@ -527,10 +556,6 @@ bool CameraManager::setVerticalFlip(bool enable) {
 }
 
 // Utility functions
-bool CameraManager::warmupCamera(int frames) {
-  return true; // Disabled to save memory
-}
-
 void CameraManager::printCameraInfo() {
   if (!camera_ready) {
     Serial.println("Camera not ready");
@@ -545,6 +570,12 @@ void CameraManager::printCameraInfo() {
     getResolutionString(current_resolution, resolution_str, sizeof(resolution_str));
     Serial.printf("Current Resolution: %s\n", resolution_str);
     Serial.printf("PSRAM Available: %s\n", psramFound() ? "Yes" : "No");
+    if (psramFound()) {
+      Serial.printf("PSRAM Size: %u bytes\n", ESP.getPsramSize());
+      Serial.printf("PSRAM Free: %u bytes\n", ESP.getFreePsram());
+    }
+    Serial.printf("Frame Buffers: %s\n",
+                  frame_buffers_in_psram ? "PSRAM" : "DRAM");
     Serial.printf("Total Captures: %u\n", capture_count);
     Serial.printf("Failed Captures: %u\n", failed_capture_count);
     Serial.printf("Success Rate: %.1f%%\n", 

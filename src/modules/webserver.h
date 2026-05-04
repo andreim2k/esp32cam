@@ -11,6 +11,7 @@
 #define HTTP_BUFFER_SIZE 1024
 #define JSON_BUFFER_SIZE 2048
 #define HTML_BUFFER_SIZE 65536
+#define HTML_CHUNK_SIZE 1024
 #define MAX_PATH_LENGTH 256
 #define MAX_HEADERS_LENGTH 2048
 #define MAX_BODY_LENGTH 4096
@@ -68,9 +69,6 @@ public:
   void createErrorResponse(const char *error, int code, char *output,
                            size_t max_len);
   bool parseJsonBody(const char *body, JsonDocument &doc);
-
-  // Web page generation
-  void generateWebPage(char *output, size_t max_len);
 
   // Camera settings from JSON
   bool parseRequestSettings(const JsonDocument &json, CameraSettings &settings,

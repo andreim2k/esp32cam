@@ -60,7 +60,7 @@ bool FlashManager::setFlash(bool enable) {
 }
 
 bool FlashManager::setFlashDuty(uint8_t duty) {
-  if (!flash_ready || !validateDutyRange(duty)) {
+  if (!flash_ready) {
     return false;
   }
   
@@ -278,8 +278,3 @@ bool FlashManager::captureWithAutoFlash(camera_fb_t** fb) {
   return (*fb != nullptr);
 }
 
-// Private methods
-bool FlashManager::validateDutyRange(uint8_t duty) {
-  // Allow full range 0-255
-  return true;
-}
