@@ -109,6 +109,15 @@ bool CameraManager::configureCamera(uint8_t jpeg_quality, framesize_t resolution
                 using_psram_buffers ? "PSRAM" : "DRAM");
   Serial.printf("Frame buffer count: %d\n", config.fb_count);
 
+  // Power-cycle the sensor to recover from soft-reset stuck states (OTA reboot, etc.)
+  if (PWDN_GPIO_NUM >= 0) {
+    pinMode(PWDN_GPIO_NUM, OUTPUT);
+    digitalWrite(PWDN_GPIO_NUM, HIGH); // power down
+    delay(10);
+    digitalWrite(PWDN_GPIO_NUM, LOW);  // power up
+    delay(100);
+  }
+
   // Camera init
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
@@ -223,8 +232,11 @@ bool CameraManager::setResolution(framesize_t resolution) {
 
   current_resolution = safe_resolution;
 
-  // The OV2640 buffers the previous frame; discard 2 frames to flush the
-  // pipeline so the next captureFrame() returns a frame at the new resolution.
+  // The OV2640 needs time to stabilize after a resolution change before the
+  // DMA pipeline produces valid frames at the new size.
+  delay(300);
+
+  // Discard stale frames captured at the old resolution.
   for (int i = 0; i < 2; i++) {
     camera_fb_t* stale = esp_camera_fb_get();
     if (stale) esp_camera_fb_return(stale);
@@ -253,8 +265,12 @@ camera_fb_t* CameraManager::captureFrame() {
     return nullptr;
   }
   
-  camera_fb_t* fb = esp_camera_fb_get();
-  
+  camera_fb_t* fb = nullptr;
+  for (int attempt = 0; attempt < 3 && !fb; attempt++) {
+    if (attempt > 0) delay(100);
+    fb = esp_camera_fb_get();
+  }
+
   if (fb) {
     if (frame_buffers_in_psram && !esp_ptr_external_ram(fb->buf)) {
       Serial.println("WARNING: Expected camera frame buffer in PSRAM, but buffer is not external RAM");
