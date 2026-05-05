@@ -190,14 +190,15 @@ bool CameraManager::initializeCameraSensor() {
 
 // Resolution management
 framesize_t CameraManager::getFrameSize(const String& size_param) {
-  if (size_param == "UXGA") return FRAMESIZE_UXGA;   // 1600x1200
-  if (size_param == "SXGA") return FRAMESIZE_SXGA;   // 1280x1024
-  if (size_param == "XGA") return FRAMESIZE_XGA;     // 1024x768
-  if (size_param == "SVGA") return FRAMESIZE_SVGA;   // 800x600
-  if (size_param == "VGA") return FRAMESIZE_VGA;     // 640x480
-  if (size_param == "CIF") return FRAMESIZE_CIF;     // 400x296
-  if (size_param == "QVGA") return FRAMESIZE_QVGA;   // 320x240
-  if (size_param == "HQVGA") return FRAMESIZE_HQVGA; // 240x176
+  // Handle both short names (UXGA) and UI format (UXGA (1600x1200))
+  if (size_param.startsWith("UXGA")) return FRAMESIZE_UXGA;   // 1600x1200
+  if (size_param.startsWith("SXGA")) return FRAMESIZE_SXGA;   // 1280x1024
+  if (size_param.startsWith("XGA")) return FRAMESIZE_XGA;     // 1024x768
+  if (size_param.startsWith("SVGA")) return FRAMESIZE_SVGA;   // 800x600
+  if (size_param.startsWith("VGA")) return FRAMESIZE_VGA;     // 640x480
+  if (size_param.startsWith("CIF")) return FRAMESIZE_CIF;     // 400x296
+  if (size_param.startsWith("QVGA")) return FRAMESIZE_QVGA;   // 320x240
+  if (size_param.startsWith("HQVGA")) return FRAMESIZE_HQVGA; // 240x176
   return FRAMESIZE_VGA; // Default
 }
 
