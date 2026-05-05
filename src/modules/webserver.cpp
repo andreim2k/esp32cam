@@ -673,12 +673,9 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest &request) {
     return response;
   }
 
-  // Discard frames buffered during/after applySettings() — sensor exposure,
-  // contrast, and AWB adjustments leave artifacts in the first few frames.
-  for (int i = 0; i < 3; i++) {
-    camera_fb_t *stale = cameraManager.captureFrame();
-    if (stale) cameraManager.releaseFrameBuffer(stale);
-  }
+  // Discard one frame buffered during applySettings() to get clean output.
+  camera_fb_t *stale = cameraManager.captureFrame();
+  if (stale) cameraManager.releaseFrameBuffer(stale);
 
   // Handle flash
   if (use_flash) {
