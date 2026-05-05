@@ -595,3 +595,6 @@ void CameraManager::logCaptureResult(CaptureResult result) {
       break;
   }
 }
+
+
+
