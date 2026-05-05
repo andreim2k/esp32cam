@@ -25,6 +25,7 @@ Thumbs.db
 *.tmp
 *.temp
 *.log
+__pycache__/
 
 # Compiled firmware
 *.bin
@@ -33,3 +34,7 @@ Thumbs.db
 
 # Credentials (security)
 src/modules/credentials.h
+
+# Generated build version artifacts
+src/version.h
+version.txt
