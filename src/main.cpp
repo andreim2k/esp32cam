@@ -36,6 +36,7 @@ void initOTA();
 unsigned long last_wifi_check = 0;
 unsigned long last_memory_check = 0;
 unsigned long last_watchdog_reset = 0;
+bool ota_initialized = false;
 const unsigned long WIFI_CHECK_INTERVAL = 30000;     // 30 seconds
 const unsigned long MEMORY_CHECK_INTERVAL = 60000;   // 60 seconds
 const unsigned long WATCHDOG_RESET_INTERVAL = 10000; // 10 seconds
@@ -263,12 +264,19 @@ void emergencyRecovery() {
 // ===================
 
 void initOTA() {
+  if (ota_initialized) {
+    return; // Already initialized, skip to avoid double-initialization issues
+  }
+
   ArduinoOTA.setHostname(configManager.getDeviceName());
 
   ArduinoOTA.onStart([]() {
     String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
     Serial.printf("OTA Start: updating %s\n", type.c_str());
+    esp_task_wdt_reset();
     webServerManager.stop(); // free TCP socket during upload
+    cameraManager.deinit();  // free PSRAM frame buffers before flash erase
+    delay(100);
   });
 
   ArduinoOTA.onEnd([]() {
@@ -292,6 +300,7 @@ void initOTA() {
   });
 
   ArduinoOTA.begin();
+  ota_initialized = true;
   char ip_str[16];
   WiFi.localIP().toString().toCharArray(ip_str, sizeof(ip_str));
   Serial.printf("OTA ready — hostname: %s, IP: %s, port: 3232\n",

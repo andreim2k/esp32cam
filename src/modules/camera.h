@@ -50,6 +50,7 @@ public:
   
   // Initialization
   bool begin(uint8_t jpeg_quality = 10, framesize_t default_resolution = FRAMESIZE_UXGA);
+  void deinit();
   bool isReady() const { return camera_ready; }
   
   // Resolution management

@@ -30,6 +30,13 @@ CameraManager::CameraManager() :
   default_settings.vflip = false;
 }
 
+void CameraManager::deinit() {
+  if (!camera_ready) return;
+  esp_camera_deinit();
+  camera_ready = false;
+  Serial.println("Camera deinitialized (PSRAM buffers freed)");
+}
+
 bool CameraManager::begin(uint8_t jpeg_quality, framesize_t default_resolution) {
   Serial.println("Initializing camera...");
   framesize_t safe_resolution = getSafeFrameSize(default_resolution);
