@@ -1,534 +1,528 @@
-# ESP32-CAM Photo Capture Server
+# ESP32-CAM Capture Server
 
-A practical ESP32-CAM firmware with modern web interface for camera control and photo capture. Features toggle controls, responsive design, and JSON-based API.
+Firmware for an AI Thinker ESP32-CAM module with a browser-based capture UI,
+JSON camera controls, persistent WiFi configuration, PWM flash control, and
+Arduino OTA updates.
 
-## ✨ Features
+The firmware serves the UI directly from the ESP32. There is no separate web
+asset build step.
 
-### 📷 **Camera Control**
-- **Resolution Selection**: Multiple camera resolutions from UXGA (1600x1200) to QVGA (320x240)
-- **Image Quality Controls**: Adjust brightness, contrast, and exposure settings
-- **Image Orientation**: Horizontal mirror and vertical flip options with toggle controls
-- **Flash Control**: Toggle-based flash control for better photos in low light
-- **Capture Feedback**: Visual spinner overlay during photo capture process
+## Current Capabilities
 
-### 🎛️ **Modern User Interface**
-- **Toggle Controls**: Intuitive switch-style controls for flash and image orientation
-- **Responsive Layout**: Adapts to various screen sizes from desktop to mobile
-- **Real-time Settings**: Instantly see current camera settings in the UI
-- **Capture Button Lock**: Prevents multiple simultaneous captures
-- **Reset to Defaults**: One-click button to restore default settings
+- Browser UI at `http://<device-ip>/`
+- Still image capture through `POST /snapshot`
+- Full camera control payload:
+  - resolution
+  - JPEG quality
+  - flash
+  - brightness
+  - contrast
+  - saturation
+  - exposure
+  - gain
+  - special effect
+  - white balance mode
+  - horizontal mirror
+  - vertical flip
+- System status through `GET /status`
+- WiFi credential and bandwidth updates through `POST /wifi`
+- Persistent configuration using EEPROM emulation
+- Static IP defaults for the local network
+- OTA firmware uploads with PlatformIO `espota`
+- Watchdog, reconnect, and memory recovery logic for long-running operation
 
-### 🔧 **Technical Features**
-- **Modular Architecture**: Clean separation between camera, flash, and web server modules
-- **Persistent Settings**: Camera settings apply immediately to live preview
-- **JSON API**: Photo capture with comprehensive JSON request/response handling
-- **Optimized Performance**: Fast photo capture with proper resource handling
+## Hardware Target
 
-## 🚀 Quick Start
+- Board: ESP32-CAM AI Thinker or compatible
+- Camera: OV2640
+- Flash LED: GPIO4, PWM controlled
+- PSRAM: required for high-resolution captures
+- WiFi: 2.4 GHz only
 
-### Hardware Requirements
-- ESP32-CAM module (AI Thinker or compatible)
-- FTDI/USB-Serial adapter for programming
+## Repository Layout
 
-### Wiring for Programming
-```
-ESP32-CAM    FTDI Adapter
-------------------------
-VCC       -> 5V (or 3.3V)
-GND       -> GND
-U0R       -> TX
-U0T       -> RX
-IO0       -> GND (for programming mode)
-```
-
-**Important**: Connect IO0 to GND only during programming. Remove this connection before normal operation.
-
-### Software Setup
-
-1. **Install PlatformIO**: 
-   ```bash
-   # macOS with Homebrew
-   brew install platformio
-   
-   # Or install PlatformIO IDE extension in VS Code
-   ```
-
-2. **Clone and Build**:
-   ```bash
-   git clone https://github.com/andreim2k/esp32cam.git
-   cd esp32
-   pio run
-   ```
-
-3. **Upload Firmware**:
-   ```bash
-   # Find your serial port
-   ls /dev/cu.*
-   
-   # Upload (replace with your port)
-   pio run --target upload --upload-port /dev/cu.usbserial-110
-   ```
-
-4. **Configuration Setup**:
-   
-   Edit `src/modules/config.cpp` to change default WiFi settings:
-   ```cpp
-   void ConfigManager::resetToDefaults() {
-     strncpy(config.wifi_ssid, "YOUR_WIFI_SSID", SSID_MAX_LEN - 1);
-     strncpy(config.wifi_password, "YOUR_WIFI_PASSWORD", PASSWORD_MAX_LEN - 1);
-     
-     config.use_static_ip = true;
-     config.static_ip = IPAddress(192, 168, 1, 100);  // Your desired IP
-     config.gateway = IPAddress(192, 168, 1, 1);      // Your router IP
-     config.subnet = IPAddress(255, 255, 255, 0);     // Network mask
-   }
-   ```
-
-## 🏗️ Project Structure
-
-The firmware is organized into separate modules:
-
-### 📁 Files and Directories
-```
-esp32/
-├── src/
-│   ├── main.cpp              # Main application entry point
-│   └── modules/
-│       ├── config.h/cpp      # WiFi and network configuration
-│       ├── camera.h/cpp      # Camera initialization and capture
-│       ├── flash.h/cpp       # Flash LED control
-│       └── webserver.h/cpp   # HTTP server and web interface
-├── web/
-│   └── index.html           # Standalone web interface template
-├── platformio.ini            # Build configuration
-└── README.md                 # This documentation
+```text
+.
+|-- platformio.ini
+|-- partitions_ota.csv
+|-- README.md
+|-- read_serial.py
+`-- src
+    |-- main.cpp
+    `-- modules
+        |-- camera.cpp / camera.h
+        |-- config.cpp / config.h
+        |-- credentials.h.example
+        |-- flash.cpp / flash.h
+        `-- webserver.cpp / webserver.h
 ```
 
-### 🔧 Module Overview
+## Firmware Architecture
 
-#### ConfigManager (`modules/config.*`)
-- Manages WiFi credentials and network settings
-- Handles static IP configuration
-- Stores settings in EEPROM for persistence
+### `src/main.cpp`
 
-#### CameraManager (`modules/camera.*`)
-- Initializes camera hardware
-- Handles resolution switching
-- Manages camera settings (brightness, contrast, etc.)
-- Tracks capture statistics
+Owns the runtime lifecycle:
 
-#### FlashManager (`modules/flash.*`)
-- Controls the onboard LED flash
-- Supports on/off toggle functionality
-- Manages flash brightness
+1. Initializes watchdog and stack protection.
+2. Loads persistent configuration.
+3. Initializes flash PWM.
+4. Initializes the camera.
+5. Connects WiFi.
+6. Starts the HTTP server.
+7. Starts Arduino OTA when WiFi is connected.
+8. Runs the main loop:
+   - watchdog reset
+   - memory checks
+   - WiFi reconnection
+   - deferred WiFi reconnects requested by the web UI
+   - `ArduinoOTA.handle()`
+   - HTTP client handling
 
-#### WebServerManager (`modules/webserver.*`)
-- Implements a simple HTTP server
-- Serves the web interface
-- Handles API endpoints for camera control
-- Processes JSON requests
-- Returns image data and status information
+### `src/modules/config.*`
 
-## 📡 API Documentation
+Stores device configuration and migrates older EEPROM layouts.
 
-### Base URL
-Once connected to WiFi, access your ESP32-CAM at: `http://[ESP32_IP_ADDRESS]`
-
-### 📸 Photo Capture Endpoint
-
-```http
-POST /snapshot
-Content-Type: application/json
-```
-
-This endpoint captures a photo with the specified settings.
-
-#### Request Structure
-```json
-{
-  "resolution": "UXGA",
-  "flash": true,
-  "brightness": 0,
-  "contrast": 0,
-  "exposure": 300,
-  "hmirror": false,
-  "vflip": false
-}
-```
-
-#### Resolution Options
-**Supported resolutions:**
-- `UXGA` - 1600×1200 (2MP, highest quality)
-- `SXGA` - 1280×1024 (1.3MP)
-- `XGA` - 1024×768 (0.8MP)
-- `SVGA` - 800×600 (0.5MP)
-- `VGA` - 640×480 (0.3MP, balanced)
-- `CIF` - 400×296 (0.1MP)
-- `QVGA` - 320×240 (0.08MP, fastest)
-
-#### Camera Settings Parameters
-- **brightness**: -2 to +2 (exposure compensation)
-- **contrast**: -2 to +2 (image contrast)
-- **exposure**: 0-1200 (manual exposure value)
-- **hmirror**: Horizontal mirror (boolean)
-- **vflip**: Vertical flip (boolean)
-- **flash**: Flash control (boolean)
-
-### 📊 Status Endpoint
-
-```http
-GET /status
-```
-
-Returns JSON system status with real-time information:
-
-```json
-{
-  "flash": {
-    "on": false,
-    "duty": 0,
-    "brightness_percent": 0
-  },
-  "wifi": {
-    "ip": "192.168.50.3",
-    "gateway": "192.168.50.1",
-    "subnet": "255.255.255.0",
-    "dns": "192.168.50.1",
-    "mac": "78:1C:3C:F6:8B:B0",
-    "ssid": "YourNetwork",
-    "mode": "Static",
-    "rssi": -62,
-    "connected": true
-  },
-  "camera": {
-    "resolution": "UXGA (1600x1200)",
-    "ready": true,
-    "total_captures": 158,
-    "failed_captures": 3
-  }
-}
-```
-
-### 🌐 Device Information Endpoint
-
-```http
-GET /
-```
-
-Returns the web interface for camera control. This endpoint serves the HTML user interface.
-
-## 🌐 Web Interface
-
-The firmware provides a modern, user-friendly web interface for controlling the ESP32-CAM.
-
-### 📱 Interface Layout
-Access the web interface at `http://[ESP32_IP_ADDRESS]` to see:
-
-**Left Side (Photo Display):**
-- 📷 **Photo Capture Area**: Shows captured photos with clear status indicator
-- 🔄 **Capture Status**: Visual feedback during the capture process
-- ⏳ **Loading Spinner**: Centered spinner appears during photo capture
-
-**Right Side (Controls):**
-- ⚙️ **Camera Controls Panel**:
-  - Resolution selector (UXGA to QVGA)
-  - Brightness slider (-2 to +2)
-  - Contrast slider (-2 to +2)
-  - Exposure slider (0-1200)
-  - Toggle switches for Horizontal Mirror and Vertical Flip
-  - Flash toggle switch
-  - "Reset to Defaults" button to restore settings
-  - "SNAPSHOT" button to capture photos
-
-- 📊 **API Payload Panel**:
-  - Shows the current camera settings in JSON format
-  - Updates in real-time as you adjust settings
-  - Displays timestamp of last update
-
-### 📡 API Endpoints
-The firmware supports these key endpoints:
-- `POST /snapshot` - Capture photos with JSON settings payload
-- `GET /status` - Get current camera and system status
-- `GET /` - Access the web interface
-
-## 📷 Usage Examples
-
-### cURL Examples
-
-```bash
-# Take a photo with default settings
-curl -X POST "http://192.168.1.100/snapshot" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "resolution": "UXGA",
-    "flash": false,
-    "brightness": 0,
-    "contrast": 0,
-    "exposure": 300,
-    "hmirror": false,
-    "vflip": false
-  }' \
-  -o photo.jpg
-
-# High-resolution photo with flash
-curl -X POST "http://192.168.1.100/snapshot" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "resolution": "UXGA",
-    "flash": true,
-    "brightness": 1,
-    "contrast": 1,
-    "exposure": 600
-  }' \
-  -o photo_flash.jpg
-
-# Capture with horizontal mirror and vertical flip
-curl -X POST "http://192.168.1.100/snapshot" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "resolution": "VGA",
-    "flash": false,
-    "brightness": 0,
-    "contrast": 0,
-    "exposure": 300,
-    "hmirror": true,
-    "vflip": true
-  }' \
-  -o flipped.jpg
-
-# Check device status
-curl "http://192.168.1.100/status" | jq .
-```
-
-### Python Example
-
-```python
-import requests
-import json
-
-# ESP32-CAM Configuration
-ESP32_IP = "192.168.1.100"
-BASE_URL = f"http://{ESP32_IP}"
-
-def capture_photo(filename="photo.jpg", settings=None):
-    """Capture a photo with custom settings"""
-    url = f"{BASE_URL}/snapshot"
-    
-    default_settings = {
-        "resolution": "UXGA",
-        "flash": False,
-        "brightness": 0,
-        "contrast": 0,
-        "exposure": 300,
-        "hmirror": False,
-        "vflip": False
-    }
-    
-    if settings:
-        default_settings.update(settings)
-    
-    response = requests.post(url, 
-                          headers={'Content-Type': 'application/json'},
-                          data=json.dumps(default_settings))
-    
-    if response.status_code == 200:
-        with open(filename, 'wb') as f:
-            f.write(response.content)
-        print(f"Photo saved as {filename} ({len(response.content)} bytes)")
-        return True
-    else:
-        print(f"Failed to capture photo: {response.status_code}")
-        return False
-
-def get_device_status():
-    """Get device status"""
-    response = requests.get(f"{BASE_URL}/status")
-    
-    if response.status_code == 200:
-        status = response.json()
-        
-        # Print formatted status
-        print("\n=== ESP32-CAM Status ===")
-        print(f"IP: {status['wifi']['ip']}")
-        print(f"Camera: {status['camera']['resolution']}")
-        print(f"Flash: {'ON' if status['flash']['on'] else 'OFF'}")
-        
-        return status
-    else:
-        print(f"Status request failed: {response.status_code}")
-        return None
-
-# Example usage
-if __name__ == "__main__":
-    # Get device status
-    status = get_device_status()
-    
-    if status:
-        # Basic capture
-        capture_photo("default.jpg")
-        
-        # With flash
-        capture_photo("with_flash.jpg", {"flash": True})
-        
-        # Custom resolution
-        capture_photo("vga.jpg", {
-            "resolution": "VGA",
-            "brightness": 1
-        })
-        
-        # Flipped image
-        capture_photo("flipped.jpg", {
-            "hmirror": True,
-            "vflip": True
-        })
-    else:
-        print("Device not accessible")
-```
-
-## ⚙️ Configuration
-
-### Network Configuration
-
-The ESP32-CAM uses EEPROM to store WiFi and network settings. Default settings are defined in `src/modules/config.cpp` and include:
+Configuration includes:
 
 - WiFi SSID and password
-- Static IP address (if enabled)
-- Gateway and subnet settings
+- static IP, gateway, subnet, DNS
+- API key field
+- device hostname
+- JPEG quality
+- default camera resolution
+- flash light threshold
+- WiFi bandwidth mode
 
-### Camera Configuration
+Credentials are loaded from `src/modules/credentials.h`, which is intentionally
+ignored by git. Use `src/modules/credentials.h.example` as the template.
 
-Camera settings can be configured through the web interface and include:
+### `src/modules/camera.*`
 
-- Resolution (UXGA, SXGA, XGA, SVGA, VGA, CIF, QVGA)
-- Brightness (-2 to +2)
-- Contrast (-2 to +2)
-- Exposure (0-1200)
-- Horizontal mirror (on/off)
-- Vertical flip (on/off)
-- Flash control (on/off)
+Owns ESP camera initialization, frame capture, resolution switching, image
+settings, statistics, and frame buffer cleanup.
 
-These settings are applied immediately when changed in the UI and are sent in the JSON payload when capturing photos through the API.
+Supported settings in the HTTP payload are represented by `CameraSettings`:
 
-## 🔧 Troubleshooting
-
-### Common Issues
-
-**Camera fails to initialize:**
-- Check all wiring connections
-- Ensure adequate power supply (5V recommended)
-- Remove IO0-GND connection after programming
-
-**WiFi connection issues:**
-- Verify SSID and password in the config.cpp file
-- Use 2.4GHz network (ESP32 doesn't support 5GHz)
-
-**Flash not working:**
-- The flash LED is on GPIO4 (built-in on most ESP32-CAM boards)
-- Check if flash LED is physically damaged
-
-**Poor image quality:**
-- Ensure adequate lighting or enable flash
-- Clean the camera lens
-- Try different resolutions
-
-### Serial Monitoring
-
-Monitor serial output for debugging:
-```bash
-pio device monitor --port /dev/cu.usbserial-110 --baud 115200
+```cpp
+struct CameraSettings {
+  framesize_t resolution;
+  uint8_t jpeg_quality;
+  int8_t brightness;
+  int8_t contrast;
+  int8_t saturation;
+  uint16_t exposure;
+  uint8_t gain;
+  uint8_t special_effect;
+  uint8_t wb_mode;
+  bool hmirror;
+  bool vflip;
+};
 ```
 
-Look for status messages like:
-- Camera initialization
-- WiFi connection
-- HTTP server startup
+### `src/modules/flash.*`
 
-### Build and Upload
+Controls the built-in flash LED on GPIO4 through LEDC PWM.
 
-Clean and rebuild if you encounter build problems:
-```bash
-pio run --target clean
-pio run --target upload --upload-port /dev/cu.usbserial-110
+It supports:
+
+- off, low, medium, and high duty presets
+- direct duty control
+- light-level analysis from camera frames
+- flash status reporting
+
+### `src/modules/webserver.*`
+
+Implements a small HTTP server using `WiFiServer`. It parses HTTP requests into
+fixed-size buffers, routes requests, serves the embedded HTML UI, streams JPEG
+responses, and returns JSON for status/configuration requests.
+
+Current routes:
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/` | Browser UI |
+| `GET` | `/status` | Device, WiFi, flash, and camera status |
+| `POST` | `/snapshot` | Capture a JPEG using JSON camera settings |
+| `POST` | `/wifi` | Save WiFi settings and request reconnect |
+
+## Critical OTA Partition Requirement
+
+OTA updates require **two application partitions**.
+
+This project uses `partitions_ota.csv` and `platformio.ini` explicitly sets:
+
+```ini
+board_build.partitions = partitions_ota.csv
 ```
 
-## 🔄 Recent Updates
+The current partition table is:
 
-### Latest Features
-- ✅ **Modern Toggle Switches**: Replaced checkboxes/buttons with toggles for flash, horizontal mirror, and vertical flip
-- ✅ **Capture Feedback**: Added spinner overlay during photo capture
-- ✅ **Capture Button Disable**: Prevents multiple simultaneous captures
-- ✅ **Reset to Defaults Button**: One-click restore of camera settings
-- ✅ **Renamed "Take Photo" to "SNAPSHOT"**: More concise button labeling
-- ✅ **Performance Optimization**: Removed cyclic status polling
-- ✅ **Eliminated Auto-Download**: Removed automatic photo downloads after capture
-- ✅ **UI Improvements**: Clean, responsive design with proper toggle switch styling
+```csv
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x140000,
+app1,     app,  ota_1,   0x150000,0x140000,
+spiffs,   data, spiffs,  0x290000,0x160000,
+coredump, data, coredump,0x3F0000,0x10000,
+```
 
-## 📦 API Endpoint Reference
+The important parts are:
 
-| Endpoint | Method | Purpose | Response Type | Description |
-|----------|--------|---------|---------------|-------------|
-| `/` | GET | Web Interface | HTML | Serves the main web interface |
-| `/snapshot` | POST | Photo Capture | Binary JPEG | Captures a photo with JSON settings |
-| `/status` | GET | System Status | JSON | Returns camera, flash, and WiFi status |
+- `app0` is one firmware slot.
+- `app1` is the second firmware slot.
+- `otadata` records which slot should boot.
+- Each app slot is `0x140000` bytes, or 1,310,720 bytes.
 
-## 🛠️ Hardware Information
+During OTA, the currently running firmware stays active in one app partition
+while the new firmware is written to the other app partition. After the upload
+is validated, the boot metadata is updated and the ESP32 boots the new slot.
 
-### ESP32-CAM Specifications
-- **Board**: ESP32-CAM (AI Thinker) with PSRAM support
-- **Camera**: OV2640 with resolution up to UXGA (1600×1200)
-- **Flash**: Built-in LED on GPIO4 (PWM controlled)
-- **Memory**: PSRAM enabled for image processing
-- **WiFi**: 2.4GHz 802.11 b/g/n
+Without two app partitions, OTA cannot safely replace the running firmware.
 
-### Build Configuration
+Do not switch this project to `huge_app.csv` or any single-app partition table
+if OTA is required. A single large app slot may allow a bigger firmware image,
+but it removes the inactive slot that OTA needs.
+
+### First Flash vs OTA Flash
+
+The first firmware installation should be done over serial:
+
+```bash
+pio run -e esp32cam --target upload
+```
+
+This writes the firmware and the OTA-capable partition table.
+
+After the board is running this partition layout and is reachable on WiFi, use
+OTA for normal updates:
+
+```bash
+pio run -e esp32cam-ota --target upload
+```
+
+If you change the partition table later, flash over serial again. Do not rely
+on OTA to safely rewrite the flash layout that OTA itself depends on.
+
+### OTA Size Limit
+
+PlatformIO checks the maximum program size against the selected app partition.
+For this project, each OTA slot is 1,310,720 bytes. Keep the firmware below
+that limit or increase both `app0` and `app1` equally in the partition table.
+
+Both OTA slots must remain large enough for the firmware.
+
+## PlatformIO Environments
+
+### Serial environment: `esp32cam`
+
+Defined in `platformio.ini`:
+
 ```ini
 [env:esp32cam]
 platform = espressif32
 board = esp32cam
 framework = arduino
-
-# Performance optimizations
-board_build.f_cpu = 240000000L
-board_build.f_flash = 80000000L
-board_build.flash_mode = qio
-board_build.partitions = huge_app.csv
-
-# Hardware features
-build_flags = 
-    -DBOARD_HAS_PSRAM
-    -DCAMERA_MODEL_AI_THINKER
-    -DCONFIG_ESP32_SPIRAM_SUPPORT=1
-
-# Libraries
-lib_deps = 
-    bblanchon/ArduinoJson@^7.0.4
+monitor_speed = 115200
+upload_speed = 460800
+board_build.partitions = partitions_ota.csv
+upload_port = /dev/cu.usbserial-110
+monitor_port = /dev/cu.usbserial-110
 ```
 
-## 🎃 Use Cases
+Use this for initial flashing, partition-table changes, and recovery.
 
-### Home Projects
-- **Security Camera**: Take photos when motion is detected
-- **Garden Monitoring**: Document plant growth over time
-- **Pet Monitoring**: Check on pets remotely
-- **Smart Home Integration**: Integrate with home automation systems
+### OTA environment: `esp32cam-ota`
 
-### Educational & Development
-- **Learning ESP32**: Great project for learning embedded systems
-- **Computer Vision**: Capture images for AI/ML processing
-- **IoT Prototyping**: Add camera capabilities to IoT projects
+```ini
+[env:esp32cam-ota]
+extends = env:esp32cam
+upload_protocol = espota
+upload_port = 192.168.50.3
+monitor_port = /dev/cu.usbserial-110
+lib_deps =
+    ArduinoJson @ 7.4.3
+```
 
-## 🤝 Contributing
+Use this after the device is already running and reachable at the configured
+IP address.
 
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Test your changes thoroughly
-4. Submit a pull request with clear description
+## Initial Setup
 
-## 📄 License
+1. Install PlatformIO.
 
-This project is open source. See LICENSE file for details.
+   ```bash
+   brew install platformio
+   ```
 
----
+2. Create local credentials.
 
-**ESP32-CAM Photo Capture Server** - Modern web interface for ESP32-CAM with toggle controls and responsive design
+   ```bash
+   cp src/modules/credentials.h.example src/modules/credentials.h
+   ```
+
+3. Edit `src/modules/credentials.h`.
+
+   ```cpp
+   #define DEFAULT_SSID "your_wifi_ssid"
+   #define DEFAULT_PASSWORD "your_wifi_password"
+   ```
+
+4. Build the firmware.
+
+   ```bash
+   pio run
+   ```
+
+5. Put the ESP32-CAM into serial boot mode.
+
+   - Connect IO0 to GND.
+   - Reset or power-cycle the board.
+
+6. Flash over serial.
+
+   ```bash
+   pio run -e esp32cam --target upload
+   ```
+
+7. Remove IO0 from GND and reset the board.
+
+8. Open the UI.
+
+   ```text
+   http://192.168.50.3/
+   ```
+
+The default persistent network profile currently forces:
+
+- IP: `192.168.50.3`
+- Gateway: `192.168.50.1`
+- Subnet: `255.255.255.0`
+- Primary DNS: `192.168.50.1`
+- Secondary DNS: `8.8.8.8`
+
+## OTA Update Workflow
+
+Use OTA only after the board has already been flashed with
+`partitions_ota.csv` and is running on WiFi.
+
+```bash
+pio run -e esp32cam-ota --target upload
+```
+
+During OTA:
+
+- the HTTP server is stopped to free the TCP socket
+- the camera is deinitialized to free PSRAM frame buffers
+- watchdog resets continue during upload progress
+- the server is restarted only if OTA errors before completion
+
+Successful OTA ends with output similar to:
+
+```text
+Result: OK
+Success
+```
+
+## Web UI
+
+The UI is embedded in `WebServerManager::handleRoot()`.
+
+The main page contains:
+
+- screen capture card
+- camera settings card
+- network status card
+- WiFi settings card
+- camera status card
+
+Camera settings are sent only when capturing a snapshot. The UI builds the
+JSON payload and posts it to `/snapshot`.
+
+## HTTP API
+
+### `GET /`
+
+Returns the embedded HTML interface.
+
+### `GET /status`
+
+Returns JSON status for flash, WiFi, and camera.
+
+Example:
+
+```bash
+curl http://192.168.50.3/status
+```
+
+Status fields include:
+
+- flash state and PWM duty
+- local IP, gateway, subnet, DNS, MAC, SSID
+- RSSI and signal percentage
+- WiFi protocol, estimated speed, and bandwidth mode
+- camera readiness, resolution, PSRAM status, and capture counters
+
+### `POST /snapshot`
+
+Captures and returns a JPEG.
+
+Example:
+
+```bash
+curl -X POST "http://192.168.50.3/snapshot" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resolution": "UXGA",
+    "quality": 10,
+    "flash": false,
+    "brightness": 0,
+    "contrast": 0,
+    "saturation": 0,
+    "exposure": 300,
+    "gain": 0,
+    "special_effect": 0,
+    "wb_mode": 0,
+    "hmirror": false,
+    "vflip": false
+  }' \
+  -o photo.jpg
+```
+
+Supported resolution values:
+
+- `UXGA`
+- `SXGA`
+- `XGA`
+- `SVGA`
+- `VGA`
+- `CIF`
+- `QVGA`
+- `HQVGA`
+
+Camera setting ranges:
+
+| Field | Range | Notes |
+| --- | --- | --- |
+| `quality` | `10` to `63` | Lower value means better JPEG quality |
+| `brightness` | `-2` to `2` | Sensor brightness |
+| `contrast` | `-2` to `2` | Sensor contrast |
+| `saturation` | `-2` to `2` | Sensor saturation |
+| `exposure` | `0` to `1200` | Manual exposure value for lower resolutions |
+| `gain` | `0` to `30` | `0` enables auto gain |
+| `special_effect` | `0` to `6` | Sensor effect mode |
+| `wb_mode` | `0` to `4` | `0` is auto white balance |
+| `flash` | boolean | Enables flash for the capture |
+| `hmirror` | boolean | Horizontal mirror |
+| `vflip` | boolean | Vertical flip |
+
+The firmware restores the previous camera resolution after a snapshot if the
+request temporarily changed it.
+
+### `POST /wifi`
+
+Saves WiFi settings to EEPROM and requests a reconnect.
+
+Example:
+
+```bash
+curl -X POST "http://192.168.50.3/wifi" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ssid": "MyNetwork",
+    "password": "MyPassword",
+    "bandwidth": 0
+  }'
+```
+
+Bandwidth values:
+
+| Value | Mode | Purpose |
+| --- | --- | --- |
+| `0` | 802.11b | Maximum range |
+| `1` | HT20 | Balanced |
+| `2` | HT40 | Maximum speed |
+
+The web UI can submit bandwidth changes without changing SSID or password.
+
+## Security Notes
+
+- `src/modules/credentials.h` is gitignored and must stay out of version
+  control.
+- The HTTP server does not currently enforce authentication.
+- Keep the device on a trusted LAN or isolated IoT network.
+- OTA is also intended for trusted-network use.
+
+## Troubleshooting
+
+### Serial upload fails
+
+- Confirm the USB serial port in `platformio.ini`.
+- Connect IO0 to GND before reset/power-on.
+- Use a stable 5 V supply.
+- Disconnect IO0 from GND after flashing.
+
+### OTA upload fails
+
+- Confirm the device is already running firmware built with
+  `partitions_ota.csv`.
+- Confirm `upload_port` in `[env:esp32cam-ota]` matches the device IP.
+- Confirm the computer and ESP32-CAM are on the same network.
+- Confirm the firmware still fits inside one OTA slot.
+- If the partition table changed, flash over serial.
+
+### Camera fails to initialize
+
+- Confirm PSRAM-capable ESP32-CAM hardware.
+- Confirm the camera ribbon cable is seated.
+- Use a stable power supply.
+- Check serial logs at 115200 baud.
+
+### WiFi connects poorly
+
+- ESP32-CAM supports 2.4 GHz only.
+- Try bandwidth mode `0` for long-range 802.11b behavior.
+- Keep the board away from noisy USB power and weak antennas.
+
+## Useful Commands
+
+Build all environments:
+
+```bash
+pio run
+```
+
+Serial upload:
+
+```bash
+pio run -e esp32cam --target upload
+```
+
+OTA upload:
+
+```bash
+pio run -e esp32cam-ota --target upload
+```
+
+Serial monitor:
+
+```bash
+pio device monitor -e esp32cam
+```
+
+Clean build outputs:
+
+```bash
+pio run --target clean
+```
+
+## Maintenance Checklist
+
+Before releasing or OTA flashing a major change:
+
+1. Run `pio run`.
+2. Confirm firmware size is below the OTA slot limit.
+3. Confirm `board_build.partitions = partitions_ota.csv`.
+4. Confirm the board is reachable at the OTA upload IP.
+5. Use serial flashing for partition-table changes.
+6. Use OTA only for normal firmware updates after the OTA layout is installed.

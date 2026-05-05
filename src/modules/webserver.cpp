@@ -282,20 +282,58 @@ ApiResponse WebServerManager::handleRoot() {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ESP32-CAM Control</title>
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#121826;color:#f7fafc}.wrap{max-width:1240px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,2fr) 360px;gap:16px}.panel{background:#1f2937;border:1px solid #374151;border-radius:8px;padding:16px}.toolbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.field{margin:0 0 12px}.field label{display:block;margin:0 0 6px;color:#cbd5e1;font-size:13px}input,select,button{width:100%;border:1px solid #4b5563;border-radius:7px;background:#111827;color:#f9fafb;padding:10px;font-size:14px}button{cursor:pointer;background:#2563eb;border-color:#2563eb;font-weight:700}.secondary{background:#374151;border-color:#4b5563}.danger{background:#b91c1c;border-color:#b91c1c}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.stat{background:#111827;border:1px solid #374151;border-radius:7px;padding:10px}.stat b{display:block;color:#93c5fd;font-size:12px;margin-bottom:4px}.muted{color:#9ca3af}.ok{color:#86efac}.bad{color:#fca5a5}.imageBox{position:relative;min-height:320px;display:flex;align-items:center;justify-content:center;background:#0f172a;border:1px dashed #475569;border-radius:8px;overflow:hidden}.imageBox img{max-width:100%;max-height:70vh;display:none}.watermark{position:absolute;left:12px;bottom:12px;max-width:calc(100% - 24px);padding:8px 10px;border-radius:7px;background:rgba(15,23,42,.72);color:#dbeafe;font-weight:700;font-size:13px;line-height:1.25;pointer-events:none;backdrop-filter:blur(4px);box-shadow:0 4px 14px rgba(0,0,0,.25)}.watermark.error{color:#fecaca;background:rgba(127,29,29,.82)}.statusLine{margin-top:10px;color:#cbd5e1}h1,h2{margin:0 0 14px}h1{font-size:24px}h2{font-size:18px}@media(max-width:900px){.wrap{grid-template-columns:1fr}.toolbar,.grid{grid-template-columns:1fr}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#121826;color:#f7fafc}.wrap{max-width:1240px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,2fr) 360px;gap:16px}main{display:grid;gap:16px}.panel{background:#1f2937;border:1px solid #374151;border-radius:8px;padding:16px}.captureHead,.panelHead{display:grid;grid-template-columns:minmax(0,1fr) 160px;gap:12px;align-items:end;margin-bottom:14px}.panelHead{align-items:center}.field{margin:0 0 12px}.settingsStack .field{margin:0}.field label,.rangeLabel{display:block;margin:0 0 7px;color:#cbd5e1;font-size:13px;font-weight:650}.rangeLabel{display:flex;align-items:center;justify-content:space-between;gap:8px}.value{min-width:42px;text-align:right;color:#f8fafc;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:2px 7px;font-size:12px;font-weight:800}input,select,button{width:100%;border:1px solid #4b5563;border-radius:7px;background:#111827;color:#f9fafb;padding:10px;font-size:14px}select{appearance:none;background-color:#111827;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23f9fafb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center;background-size:18px;padding-right:46px}input[type=range]{height:24px;padding:0;accent-color:#3b82f6}button{cursor:pointer;background:#2563eb;border-color:#2563eb;font-weight:700}.secondary{background:#374151;border-color:#4b5563}.smallBtn{width:auto;min-width:120px;padding:9px 12px}.danger{background:#b91c1c;border-color:#b91c1c}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.settingsStack{display:grid;gap:16px}.settingsBlock{border-top:1px solid #334155;padding-top:14px}.settingsBlock:first-child{border-top:0;padding-top:0}.sectionTitle{margin:0 0 10px;color:#93c5fd;font-size:12px;font-weight:800}.settingsGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 16px}.settingsGrid.processing{grid-template-columns:repeat(4,minmax(0,1fr));align-items:end}.check{display:flex;align-items:center;gap:9px;min-height:41px;padding:10px;border:1px solid #374151;border-radius:7px;background:#111827;color:#f9fafb;font-size:14px;font-weight:650}.check input{width:16px;height:16px;accent-color:#3b82f6}.stat{background:#111827;border:1px solid #374151;border-radius:7px;padding:10px}.stat b{display:block;color:#93c5fd;font-size:12px;margin-bottom:4px}.muted{color:#9ca3af}.ok{color:#86efac}.bad{color:#fca5a5}.imageBox{position:relative;min-height:320px;display:flex;align-items:center;justify-content:center;background:#0f172a;border:1px dashed #475569;border-radius:8px;overflow:hidden}.imageBox img{max-width:100%;max-height:70vh;display:none}.watermark{position:absolute;left:12px;bottom:12px;max-width:calc(100% - 24px);padding:8px 10px;border-radius:7px;background:rgba(15,23,42,.72);color:#dbeafe;font-weight:700;font-size:13px;line-height:1.25;pointer-events:none;backdrop-filter:blur(4px);box-shadow:0 4px 14px rgba(0,0,0,.25)}.watermark.error{color:#fecaca;background:rgba(127,29,29,.82)}.statusLine{margin-top:10px;color:#cbd5e1}h1,h2{margin:0 0 14px}h1{font-size:24px}h2{font-size:18px}.panelHead h2{margin:0}@media(max-width:900px){.wrap{grid-template-columns:1fr}.captureHead,.panelHead,.grid,.settingsGrid{grid-template-columns:1fr}.settingsGrid.processing{grid-template-columns:repeat(2,minmax(0,1fr))}.smallBtn{width:100%}}
+select{-webkit-appearance:none}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <main class="panel">
-    <h1>ESP32-CAM</h1>
-    <div class="toolbar">
-      <div class="field"><label>Resolution</label><select id="resolution"><option>UXGA</option><option>SXGA</option><option>XGA</option><option>SVGA</option><option>VGA</option><option>QVGA</option></select></div>
-      <div class="field"><label>JPEG quality: <span id="qualityVal">10</span></label><input id="quality" type="range" min="10" max="63" value="10" oninput="$('qualityVal').textContent=this.value" style="padding:4px 0"></div>
-      <div class="field"><label>Flash</label><select id="flash"><option value="false">Off</option><option value="true">On</option></select></div>
-      <div class="field"><label>&nbsp;</label><button id="capture">Snapshot</button></div>
-    </div>
-    <div class="imageBox"><span id="placeholder" class="muted">No image captured yet</span><img id="photo" alt="Captured frame"><div id="captureStatus" class="watermark">Ready</div></div>
+  <main>
+    <section class="panel">
+      <div class="captureHead">
+        <div>
+          <h1>Screen Capture</h1>
+          <div class="muted">ESP32-CAM live snapshot output</div>
+        </div>
+        <button id="capture">Snapshot</button>
+      </div>
+      <div class="imageBox"><span id="placeholder" class="muted">No image captured yet</span><img id="photo" alt="Captured frame"><div id="captureStatus" class="watermark">Ready</div></div>
+    </section>
+    <section class="panel">
+      <div class="panelHead">
+        <h2>Camera Settings</h2>
+        <button id="resetCamera" class="secondary smallBtn">Reset</button>
+      </div>
+      <div class="settingsStack">
+        <div class="settingsBlock">
+          <div class="sectionTitle">Capture</div>
+          <div class="settingsGrid">
+            <div class="field"><label>Resolution</label><select id="resolution"><option>UXGA</option><option>SXGA</option><option>XGA</option><option>SVGA</option><option>VGA</option><option>CIF</option><option>QVGA</option><option>HQVGA</option></select></div>
+            <div class="field"><label class="rangeLabel"><span>JPEG quality</span><span class="value" id="qualityVal">10</span></label><input id="quality" type="range" min="10" max="63" value="10"></div>
+            <div class="field"><label>Flash</label><select id="flash"><option value="false">Off</option><option value="true">On</option></select></div>
+          </div>
+        </div>
+        <div class="settingsBlock">
+          <div class="sectionTitle">Image Tuning</div>
+          <div class="settingsGrid">
+            <div class="field"><label class="rangeLabel"><span>Brightness</span><span class="value" id="brightnessVal">0</span></label><input id="brightness" type="range" min="-2" max="2" value="0"></div>
+            <div class="field"><label class="rangeLabel"><span>Contrast</span><span class="value" id="contrastVal">0</span></label><input id="contrast" type="range" min="-2" max="2" value="0"></div>
+            <div class="field"><label class="rangeLabel"><span>Saturation</span><span class="value" id="saturationVal">0</span></label><input id="saturation" type="range" min="-2" max="2" value="0"></div>
+            <div class="field"><label class="rangeLabel"><span>Exposure</span><span class="value" id="exposureVal">300</span></label><input id="exposure" type="range" min="0" max="1200" step="10" value="300"></div>
+            <div class="field"><label class="rangeLabel"><span>Gain</span><span class="value" id="gainVal">0</span></label><input id="gain" type="range" min="0" max="30" value="0"></div>
+          </div>
+        </div>
+        <div class="settingsBlock">
+          <div class="sectionTitle">Processing</div>
+          <div class="settingsGrid processing">
+            <div class="field"><label>White balance</label><select id="wbMode"><option value="0">Auto</option><option value="1">Sunny</option><option value="2">Cloudy</option><option value="3">Office</option><option value="4">Home</option></select></div>
+            <div class="field"><label>Special effect</label><select id="specialEffect"><option value="0">None</option><option value="1">Negative</option><option value="2">Grayscale</option><option value="3">Red tint</option><option value="4">Green tint</option><option value="5">Blue tint</option><option value="6">Sepia</option></select></div>
+            <label class="check"><input id="hmirror" type="checkbox"><span>Horizontal mirror</span></label>
+            <label class="check"><input id="vflip" type="checkbox"><span>Vertical flip</span></label>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
   <aside>
     <section class="panel">
@@ -336,6 +374,30 @@ ApiResponse WebServerManager::handleRoot() {
 const $=id=>document.getElementById(id);
 function setText(id,value){$(id).textContent=value??'-'}
 function bandwidthValue(label){if((label||'').includes('HT40'))return '2';if((label||'').includes('HT20'))return '1';return '0'}
+const cameraDefaults={resolution:'UXGA',flash:'false',wbMode:'0',quality:10,brightness:0,contrast:0,saturation:0,exposure:300,gain:0,specialEffect:'0',hmirror:false,vflip:false};
+const rangeFields=['quality','brightness','contrast','saturation','exposure','gain'];
+function syncRangeLabel(id){const el=$(id+'Val');if(el)el.textContent=$(id).value}
+function applyCameraDefaults(){
+  $('resolution').value=cameraDefaults.resolution; $('flash').value=cameraDefaults.flash; $('wbMode').value=cameraDefaults.wbMode; $('specialEffect').value=cameraDefaults.specialEffect;
+  rangeFields.forEach(id=>{$(id).value=cameraDefaults[id];syncRangeLabel(id)});
+  $('hmirror').checked=cameraDefaults.hmirror; $('vflip').checked=cameraDefaults.vflip;
+}
+function cameraPayload(){
+  return {
+    resolution:$('resolution').value,
+    quality:parseInt($('quality').value,10),
+    flash:$('flash').value==='true',
+    brightness:parseInt($('brightness').value,10),
+    contrast:parseInt($('contrast').value,10),
+    saturation:parseInt($('saturation').value,10),
+    exposure:parseInt($('exposure').value,10),
+    gain:parseInt($('gain').value,10),
+    special_effect:parseInt($('specialEffect').value,10),
+    wb_mode:parseInt($('wbMode').value,10),
+    hmirror:$('hmirror').checked,
+    vflip:$('vflip').checked
+  };
+}
 async function refreshStatus(){
   try{
     const r=await fetch('/status');
@@ -353,7 +415,7 @@ async function refreshStatus(){
 async function capture(){
   $('captureStatus').className='watermark';
   $('captureStatus').textContent='Capturing...';
-  const payload={resolution:$('resolution').value,quality:parseInt($('quality').value,10),flash:$('flash').value==='true'};
+  const payload=cameraPayload();
   try{
     const r=await fetch('/snapshot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(!r.ok)throw new Error(await r.text());
@@ -381,7 +443,10 @@ async function saveWifi(){
 }
 $('capture').addEventListener('click',capture);
 $('saveWifi').addEventListener('click',saveWifi);
+$('resetCamera').addEventListener('click',applyCameraDefaults);
+rangeFields.forEach(id=>$(id).addEventListener('input',()=>syncRangeLabel(id)));
 $('togglePassword').addEventListener('click',()=>{$('wifiInputPassword').type=$('wifiInputPassword').type==='password'?'text':'password'});
+applyCameraDefaults();
 refreshStatus();
 setInterval(refreshStatus,15000);
 </script>
