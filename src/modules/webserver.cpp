@@ -291,7 +291,7 @@ ApiResponse WebServerManager::handleRoot() {
     <h1>ESP32-CAM</h1>
     <div class="toolbar">
       <div class="field"><label>Resolution</label><select id="resolution"><option>UXGA</option><option>SXGA</option><option>XGA</option><option>SVGA</option><option>VGA</option><option>QVGA</option></select></div>
-      <div class="field"><label>JPEG quality</label><input id="quality" type="number" min="0" max="63" value="10"></div>
+      <div class="field"><label>JPEG quality</label><input id="quality" type="number" min="10" max="63" value="10"></div>
       <div class="field"><label>Flash</label><select id="flash"><option value="false">Off</option><option value="true">On</option></select></div>
       <div class="field"><label>&nbsp;</label><button id="capture">Snapshot</button></div>
     </div>
@@ -681,7 +681,7 @@ bool WebServerManager::parseRequestSettings(const JsonDocument &json,
 
   // Parse numeric settings
   if (json["quality"].is<int>())
-    settings.jpeg_quality = constrain(json["quality"].as<int>(), 0, 63);
+    settings.jpeg_quality = constrain(json["quality"].as<int>(), 10, 63);
   if (json["brightness"].is<int>())
     settings.brightness = constrain(json["brightness"], -2, 2);
   if (json["contrast"].is<int>())

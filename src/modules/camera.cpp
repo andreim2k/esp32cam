@@ -41,7 +41,7 @@ bool CameraManager::begin(uint8_t jpeg_quality, framesize_t default_resolution) 
   Serial.println("Initializing camera...");
   framesize_t safe_resolution = getSafeFrameSize(default_resolution);
   default_settings.resolution = safe_resolution;
-  default_settings.jpeg_quality = constrain(jpeg_quality, 0, 63);
+  default_settings.jpeg_quality = constrain(jpeg_quality, 10, 63);
   
   // Retry camera initialization up to 3 times
   const int max_retries = 3;
@@ -337,7 +337,7 @@ bool CameraManager::applySettings(const CameraSettings& settings) {
 
   CameraSettings safe_settings = settings;
   safe_settings.resolution = getSafeFrameSize(settings.resolution);
-  safe_settings.jpeg_quality = constrain(settings.jpeg_quality, 0, 63);
+  safe_settings.jpeg_quality = constrain(settings.jpeg_quality, 10, 63);
 
   if (!validateSettings(safe_settings)) {
     return false;
@@ -448,7 +448,7 @@ bool CameraManager::setSaturation(int8_t saturation) {
 }
 
 bool CameraManager::setJPEGQuality(uint8_t quality) {
-  if (!camera_ready || quality > 63) return false;
+  if (!camera_ready || quality < 10 || quality > 63) return false;
   sensor_t* s = getSensor();
   return s && s->set_quality(s, quality) == 0;
 }
@@ -567,7 +567,7 @@ bool CameraManager::validateSettings(const CameraSettings& settings) {
   if (settings.contrast < -2 || settings.contrast > 2) return false;
   if (settings.saturation < -2 || settings.saturation > 2) return false;
   if (settings.exposure > 1200) return false;
-  if (settings.jpeg_quality > 63) return false;
+  if (settings.jpeg_quality < 10 || settings.jpeg_quality > 63) return false;
   if (settings.gain > 30) return false;
   if (settings.special_effect > 6) return false;
   if (settings.wb_mode > 4) return false;
