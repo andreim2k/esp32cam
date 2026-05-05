@@ -473,9 +473,9 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest &request) {
     return response;
   }
 
-  // Discard the frame buffered before applySettings() so the captured image
-  // uses the new settings/resolution and is not a pre-flash frame.
-  {
+  // Discard frames buffered during/after applySettings() — sensor exposure,
+  // contrast, and AWB adjustments leave artifacts in the first few frames.
+  for (int i = 0; i < 3; i++) {
     camera_fb_t *stale = cameraManager.captureFrame();
     if (stale) cameraManager.releaseFrameBuffer(stale);
   }

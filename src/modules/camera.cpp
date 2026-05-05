@@ -232,12 +232,12 @@ bool CameraManager::setResolution(framesize_t resolution) {
 
   current_resolution = safe_resolution;
 
-  // The OV2640 needs time to stabilize after a resolution change before the
-  // DMA pipeline produces valid frames at the new size.
-  delay(300);
+  // The OV2640 needs time to stabilize after a resolution change. The sensor
+  // pipeline and JPEG encoder take several frames to flush the old geometry.
+  delay(500);
 
   // Discard stale frames captured at the old resolution.
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 4; i++) {
     camera_fb_t* stale = esp_camera_fb_get();
     if (stale) esp_camera_fb_return(stale);
   }
