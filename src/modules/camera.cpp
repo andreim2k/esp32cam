@@ -233,11 +233,11 @@ bool CameraManager::setResolution(framesize_t resolution) {
 
   current_resolution = safe_resolution;
 
-  // The OV2640 needs minimal time to flush the old geometry after resolution change.
-  delay(100);
+  // The OV2640 needs time to flush the old geometry after resolution change.
+  delay(200);
 
-  // Discard one stale frame to get a clean frame at the new resolution.
-  for (int i = 0; i < 1; i++) {
+  // Discard 2 stale frames to get a clean frame at the new resolution.
+  for (int i = 0; i < 2; i++) {
     camera_fb_t* stale = esp_camera_fb_get();
     if (stale) esp_camera_fb_return(stale);
   }

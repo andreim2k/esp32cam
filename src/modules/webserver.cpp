@@ -673,9 +673,11 @@ ApiResponse WebServerManager::handleSnapshot(const HttpRequest &request) {
     return response;
   }
 
-  // Discard one frame buffered during applySettings() to get clean output.
-  camera_fb_t *stale = cameraManager.captureFrame();
-  if (stale) cameraManager.releaseFrameBuffer(stale);
+  // Discard 2 frames buffered during applySettings() to ensure clean output.
+  for (int i = 0; i < 2; i++) {
+    camera_fb_t *stale = cameraManager.captureFrame();
+    if (stale) cameraManager.releaseFrameBuffer(stale);
+  }
 
   // Handle flash
   if (use_flash) {
