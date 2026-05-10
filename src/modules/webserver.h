@@ -60,6 +60,7 @@ public:
   ApiResponse handleStatus();
   ApiResponse handleSnapshot(const HttpRequest &request);
   ApiResponse handleWiFiConfig(const HttpRequest &request);
+  ApiResponse handleReset(const HttpRequest &request);
   ApiResponse handle404();
 
   // JSON utilities

@@ -221,6 +221,8 @@ ApiResponse WebServerManager::processRequest(const HttpRequest &request) {
     return handleSnapshot(request);
   } else if (strcmp(request.path, "/wifi") == 0) {
     return handleWiFiConfig(request);
+  } else if (strcmp(request.path, "/reset") == 0) {
+    return handleReset(request);
   } else {
     return handle404();
   }
@@ -436,6 +438,7 @@ footer{margin-top:24px;padding:16px;text-align:center;border-top:1px solid #3341
       <div class="field"><label>Performance</label><select id="wifiInputBandwidth"><option value="0">Max Range (802.11b)</option><option value="1">Balanced (HT20)</option><option value="2">Max Speed (HT40)</option></select></div>
       <button id="saveWifi">Update & Reconnect</button>
       <button id="togglePassword" class="secondary" style="margin-top:8px">Show Password</button>
+      <button id="resetDevice" class="secondary" style="margin-top:8px;background:#7f1d1d;border-color:#991b1b">Reset Device</button>
       <div id="wifiResult" class="statusLine"></div>
     </section>
     <section class="panel" style="margin-top:16px">
@@ -549,6 +552,20 @@ async function capture(){
     btn.disabled=false;
   }
 }
+async function resetDevice(){
+  const res=$('wifiResult');
+  res.style.display='block';
+  res.textContent='Restarting...';
+  try{
+    await fetch('/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  }catch(e){}
+  let attempts=0;
+  const poll=setInterval(async()=>{
+    attempts++;
+    if(attempts>20){clearInterval(poll);res.textContent='Device did not come back online';return;}
+    try{const r=await fetch('/status');if(r.ok){clearInterval(poll);window.location.reload();}}catch(e){}
+  },2000);
+}
 async function saveWifi(){
   const payload={bandwidth:parseInt($('wifiInputBandwidth').value,10)};
   const ssid=$('wifiInputSsid').value.trim();
@@ -567,6 +584,7 @@ async function saveWifi(){
 }
 $('capture').addEventListener('click',capture);
 $('saveWifi').addEventListener('click',saveWifi);
+$('resetDevice').addEventListener('click',resetDevice);
 $('refreshStatus').addEventListener('click',refreshStatus);
 $('resetCamera').addEventListener('click',applyCameraDefaults);
 $('copyPayload').addEventListener('click',()=>{
@@ -805,6 +823,31 @@ ApiResponse WebServerManager::handleWiFiConfig(const HttpRequest &request) {
   return response;
 }
 
+ApiResponse WebServerManager::handleReset(const HttpRequest &request) {
+  ApiResponse response;
+  response.status_code = 200;
+  strncpy(response.content_type, "application/json",
+          sizeof(response.content_type) - 1);
+  response.content_type[sizeof(response.content_type) - 1] = '\0';
+  response.is_binary = false;
+
+  if (request.type != REQ_POST) {
+    response.status_code = 405;
+    createErrorResponse("Method not allowed", 405, response.body,
+                        sizeof(response.body));
+    return response;
+  }
+
+  JsonDocument resp;
+  resp["status"] = "success";
+  resp["message"] = "Device is restarting...";
+  serializeJson(resp, response.body, sizeof(response.body));
+
+  // Trigger ESP32 restart after sending response
+  ESP.restart();
+  return response;
+}
+
 ApiResponse WebServerManager::handle404() {
   ApiResponse response;
   response.status_code = 404;
@@ -1001,6 +1044,7 @@ void WebServerManager::generateDeviceInfo(JsonDocument &doc) {
   JsonObject endpoints = doc["endpoints"].to<JsonObject>();
   endpoints["snapshot"] = "POST /snapshot - Camera capture with full settings";
   endpoints["status"] = "GET /status - System status and statistics";
+  endpoints["reset"] = "POST /reset - Reboot the ESP32 device";
   endpoints["info"] = "GET / - Device information";
 
   JsonObject network = doc["network"].to<JsonObject>();
